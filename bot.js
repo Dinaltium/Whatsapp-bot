@@ -45,6 +45,16 @@ function startHealthServer() {
   server.listen(port, () => {
     console.log(`🌐 Health server listening on port ${port}`);
   });
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.warn(`⚠️ Health server port ${port} already in use. Continuing without health endpoint.`);
+      return;
+    }
+
+    // Re-throw unexpected errors so they're not silently swallowed
+    console.error('Health server error:', err);
+    throw err;
+  });
 
 }
 
