@@ -4,6 +4,7 @@ const {
   fetchLatestBaileysVersion,
   DisconnectReason
 } = require("@whiskeysockets/baileys");
+const http = require("http");
 
 const qrcode = require("qrcode-terminal");
 const P = require("pino");
@@ -25,6 +26,27 @@ const userAiSessions = new Map();
 const BOT_ASCII_BANNER = String.raw`░█▀█░█▀█░█▀▄░█▀█░█▀▀
 ░█▀▀░█▀█░█▀▄░█▀█░█░█
 ░▀░░░▀░▀░▀░▀░▀░▀░▀▀▀`;
+
+function startHealthServer() {
+
+  const port = Number(process.env.PORT || 3000);
+
+  const server = http.createServer((req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", service: "parag-whatsapp-bot" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("PARAG bot is running");
+  });
+
+  server.listen(port, () => {
+    console.log(`🌐 Health server listening on port ${port}`);
+  });
+
+}
 
 function printBanner() {
 
@@ -310,6 +332,7 @@ const {
 async function startBot() {
 
   printBanner();
+  startHealthServer();
 
   const databaseUrl = getDatabaseUrl();
   const authStore = databaseUrl

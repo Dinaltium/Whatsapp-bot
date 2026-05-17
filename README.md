@@ -62,7 +62,7 @@ git push -u origin main
 
 ## Deploy on Render
 
-Use a **Background Worker** (not Web Service) because this bot does not expose an HTTP port.
+This project can run as a **Web Service** with a minimal health endpoint.
 
 ### Option A: Blueprint (recommended)
 
@@ -74,12 +74,13 @@ Use a **Background Worker** (not Web Service) because this bot does not expose a
 	- `ADMIN_JIDS`
 5. Deploy.
 
-### Option B: Manual Worker setup
+### Option B: Manual Web Service setup
 
-1. Create a **Background Worker** in Render and connect this repo.
+1. Create a **Web Service** in Render and connect this repo.
 2. Use:
 	- Build Command: `npm install`
 	- Start Command: `npm start`
+ 	- Health Check Path: `/health`
 3. Add environment variables:
 	- `GROQ_API_KEY`
 	- `GROQ_MODEL=llama-3.3-70b-versatile`
@@ -91,6 +92,7 @@ Use a **Background Worker** (not Web Service) because this bot does not expose a
 ### First deploy notes
 
 - Open worker logs and scan the QR when prompted.
+- The service now exposes `GET /health` for uptime checks.
 - If `DATABASE_URL` is set, auth state is stored in Neon PostgreSQL (recommended for persistence).
 - If `DATABASE_URL` is not set, auth state falls back to local `auth/` files and can be lost on ephemeral environments.
 - Set `AUTH_STATE_JWT_SECRET` to JWT-wrap stored auth payloads for integrity and tamper resistance.

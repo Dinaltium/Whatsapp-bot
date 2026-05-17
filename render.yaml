@@ -1,10 +1,11 @@
 services:
-  - type: worker
+  - type: web
     name: parag-whatsapp-bot
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: GROQ_API_KEY
