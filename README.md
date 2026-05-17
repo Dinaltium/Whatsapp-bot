@@ -51,18 +51,37 @@ git push -u origin main
 
 ## Deploy on Render
 
-1. Create a **Web Service** in Render and connect this GitHub repository.
-2. Use these settings:
+Use a **Background Worker** (not Web Service) because this bot does not expose an HTTP port.
+
+### Option A: Blueprint (recommended)
+
+1. Push this repo to GitHub (already done).
+2. In Render: **New +** → **Blueprint**.
+3. Select this repository; Render will read [render.yaml](render.yaml).
+4. Set secret env values when prompted:
+	- `GROQ_API_KEY`
+	- `ADMIN_JIDS`
+5. Deploy.
+
+### Option B: Manual Worker setup
+
+1. Create a **Background Worker** in Render and connect this repo.
+2. Use:
 	- Build Command: `npm install`
 	- Start Command: `npm start`
-3. Add environment variables in Render:
+3. Add environment variables:
 	- `GROQ_API_KEY`
 	- `GROQ_MODEL=llama-3.3-70b-versatile`
 	- `ALLOW_FROM_ME_MESSAGES=true`
 	- `ADMIN_JIDS=<your_jid@s.whatsapp.net>`
-	- `ALLOWED_GROUPS_FILE=allowed-groups.json` (optional)
-	- `ALLOWED_CHATS_FILE=allowed-chats.json` (optional)
-4. Redeploy.
+	- `ALLOWED_GROUPS_FILE=allowed-groups.json`
+	- `ALLOWED_CHATS_FILE=allowed-chats.json`
+
+### First deploy notes
+
+- Open worker logs and scan the QR when prompted.
+- Auth state in `auth/` is local and ignored by git; on free/ephemeral environments, session can reset after restart.
+- For stable sessions, add persistent storage or move auth state to a persistent database/object store.
 
 ### Important note for WhatsApp auth
 
