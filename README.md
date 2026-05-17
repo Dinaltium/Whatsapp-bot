@@ -14,6 +14,17 @@ npm install
 GROQ_API_KEY=PASTE_YOUR_GROQ_API_KEY_HERE
 GROQ_MODEL=llama-3.3-70b-versatile
 ALLOW_FROM_ME_MESSAGES=true
+
+# Admin + allowlists
+ADMIN_JIDS=1234567890@s.whatsapp.net
+ALLOWED_GROUPS_FILE=allowed-groups.json
+ALLOWED_CHATS_FILE=allowed-chats.json
+
+# Optional: Neon PostgreSQL auth-state storage (recommended for cloud deploy)
+DATABASE_URL=postgresql://<user>:<password>@<host>/<db>?sslmode=require
+
+# Optional security hardening for DB auth payloads (JWT wrapped at rest)
+AUTH_STATE_JWT_SECRET=replace_with_a_long_random_secret
 ```
 
 3. Run bot:
@@ -80,9 +91,12 @@ Use a **Background Worker** (not Web Service) because this bot does not expose a
 ### First deploy notes
 
 - Open worker logs and scan the QR when prompted.
-- Auth state in `auth/` is local and ignored by git; on free/ephemeral environments, session can reset after restart.
-- For stable sessions, add persistent storage or move auth state to a persistent database/object store.
+- If `DATABASE_URL` is set, auth state is stored in Neon PostgreSQL (recommended for persistence).
+- If `DATABASE_URL` is not set, auth state falls back to local `auth/` files and can be lost on ephemeral environments.
+- Set `AUTH_STATE_JWT_SECRET` to JWT-wrap stored auth payloads for integrity and tamper resistance.
 
-### Important note for WhatsApp auth
+### Security notes
 
-This bot uses local auth state (`auth/`) which is ignored by git. On Render, ephemeral files may be reset on restart, so WhatsApp sessions can be lost unless you use persistent storage or a remote auth store.
+- Keep `.env` private and never commit it.
+- Rotate `GROQ_API_KEY` and `AUTH_STATE_JWT_SECRET` if exposure is suspected.
+- Use Render environment variables (secrets), not hardcoded keys.

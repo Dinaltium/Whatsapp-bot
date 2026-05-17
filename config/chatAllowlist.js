@@ -11,17 +11,19 @@ function normalizeChatJid(jid) {
 
 function loadFromEnv() {
   const env = process.env.ALLOWED_CHATS || '';
-  return env.split(',').map(s => s.trim()).filter(Boolean);
+  return env.split(',').map((entry) => entry.trim()).filter(Boolean);
 }
 
 function loadFromFile(filePath) {
   try {
-    const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
-    const raw = fs.readFileSync(abs, 'utf8');
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(process.cwd(), filePath);
+    const raw = fs.readFileSync(absolutePath, 'utf8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.map(String);
-  } catch (e) {
-    // ignore errors and return empty
+  } catch (error) {
+    // ignore file errors and use empty list
   }
 
   return [];
@@ -38,8 +40,7 @@ function ensureLoaded() {
     allowedChats = allowedChats.concat(fromFile);
   }
 
-  // normalize and dedupe
-  allowedChats = Array.from(new Set(allowedChats.map(s => s.trim()))).filter(Boolean);
+  allowedChats = Array.from(new Set(allowedChats.map((entry) => entry.trim()))).filter(Boolean);
 }
 
 function isChatAllowed(jid) {
@@ -47,7 +48,6 @@ function isChatAllowed(jid) {
 
   ensureLoaded();
 
-  // If no allowed chats configured, allow all chats
   if (allowedChats.length === 0) return true;
 
   const normalizedInput = normalizeChatJid(jid);
@@ -57,18 +57,20 @@ function isChatAllowed(jid) {
     normalizedInput?.replace(/@s\.whatsapp\.net$/, '@lid')
   ].filter(Boolean));
 
-  return allowedChats.some((item) => {
-    const normalizedItem = normalizeChatJid(item);
-    return inputVariants.has(item) || inputVariants.has(normalizedItem);
+  return allowedChats.some((entry) => {
+    const normalizedEntry = normalizeChatJid(entry);
+    return inputVariants.has(entry) || inputVariants.has(normalizedEntry);
   });
 }
 
-function writeToFile(filePath, arr) {
+function writeToFile(filePath, data) {
   try {
-    const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
-    fs.writeFileSync(abs, JSON.stringify(arr, null, 2), 'utf8');
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(process.cwd(), filePath);
+    fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), 'utf8');
     return true;
-  } catch (e) {
+  } catch (error) {
     return false;
   }
 }
@@ -85,24 +87,30 @@ function listChats() {
 
 function addChat(jid) {
   if (!jid) return false;
+
   ensureLoaded();
+
   const normalized = normalizeChatJid(jid);
   if (allowedChats.includes(normalized)) return true;
+
   allowedChats.push(normalized);
-  allowedChats = Array.from(new Set(allowedChats.map(s => s.trim()))).filter(Boolean);
-  const file = getStorageFile();
-  return writeToFile(file, allowedChats);
+  allowedChats = Array.from(new Set(allowedChats.map((entry) => entry.trim()))).filter(Boolean);
+
+  return writeToFile(getStorageFile(), allowedChats);
 }
 
 function removeChat(jid) {
   if (!jid) return false;
+
   ensureLoaded();
+
   const normalized = normalizeChatJid(jid);
-  const idx = allowedChats.indexOf(normalized);
-  if (idx === -1) return false;
-  allowedChats.splice(idx, 1);
-  const file = getStorageFile();
-  return writeToFile(file, allowedChats);
+  const index = allowedChats.indexOf(normalized);
+  if (index === -1) return false;
+
+  allowedChats.splice(index, 1);
+
+  return writeToFile(getStorageFile(), allowedChats);
 }
 
 module.exports = {

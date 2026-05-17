@@ -298,8 +298,12 @@ function addSessionMessage(session, role, content) {
 }
 
 const WhatsAppAgent = require("./agents/WhatsAppAgent");
-const groupConfig = require("./agents/groupConfig");
-const chatConfig = require("./agents/chatConfig");
+const groupConfig = require("./config/groupAllowlist");
+const chatConfig = require("./config/chatAllowlist");
+const {
+  useNeonAuthState,
+  getDatabaseUrl
+} = require("./storage/neonAuthStateStore");
 
 // Agent-specific helpers moved to agents/WhatsAppAgent.js
 
@@ -307,8 +311,18 @@ async function startBot() {
 
   printBanner();
 
-  const { state, saveCreds } =
-    await useMultiFileAuthState("auth");
+  const databaseUrl = getDatabaseUrl();
+  const authStore = databaseUrl
+    ? await useNeonAuthState("parag")
+    : await useMultiFileAuthState("auth");
+
+  const { state, saveCreds } = authStore;
+
+  if (databaseUrl) {
+    console.log("✅ Using Neon PostgreSQL for auth state storage.");
+  } else {
+    console.log("ℹ Using local auth/ files for auth state storage.");
+  }
 
   const { version } =
     await fetchLatestBaileysVersion();
