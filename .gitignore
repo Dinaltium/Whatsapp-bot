@@ -1,5 +1,6 @@
 node_modules/
 auth/
+dist/
 .env
 allowed-groups.json
 allowedGroups.json

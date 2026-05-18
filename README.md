@@ -1,5 +1,7 @@
 # PARAG WhatsApp Bot
 
+A TypeScript-based WhatsApp bot with Groq AI integration, admin controls, and allowlist management.
+
 ## Setup
 
 1. Install dependencies:
@@ -8,12 +10,13 @@
 npm install
 ```
 
-2. Open .env and paste your Groq key:
+2. Create `.env` file with your configuration:
 
 ```env
 GROQ_API_KEY=PASTE_YOUR_GROQ_API_KEY_HERE
 GROQ_MODEL=llama-3.3-70b-versatile
 ALLOW_FROM_ME_MESSAGES=true
+PORT=3000
 
 # Admin + allowlists
 ADMIN_JIDS=1234567890@s.whatsapp.net
@@ -27,10 +30,15 @@ DATABASE_URL=postgresql://<user>:<password>@<host>/<db>?sslmode=require
 AUTH_STATE_JWT_SECRET=replace_with_a_long_random_secret
 ```
 
-3. Run bot:
+3. Build and run:
 
 ```bash
-node bot.js
+# Production: build then run
+npm run build
+npm start
+
+# Development: run directly with hot reload
+npm run dev
 ```
 
 ## Message behavior
@@ -70,24 +78,24 @@ This project can run as a **Web Service** with a minimal health endpoint.
 2. In Render: **New +** → **Blueprint**.
 3. Select this repository; Render will read [render.yaml](render.yaml).
 4. Set secret env values when prompted:
-	- `GROQ_API_KEY`
-	- `ADMIN_JIDS`
+   - `GROQ_API_KEY`
+   - `ADMIN_JIDS`
 5. Deploy.
 
 ### Option B: Manual Web Service setup
 
 1. Create a **Web Service** in Render and connect this repo.
 2. Use:
-	- Build Command: `npm install`
-	- Start Command: `npm start`
- 	- Health Check Path: `/health`
+   - Build Command: `npm install`
+   - Start Command: `npm start`
+   - Health Check Path: `/health`
 3. Add environment variables:
-	- `GROQ_API_KEY`
-	- `GROQ_MODEL=llama-3.3-70b-versatile`
-	- `ALLOW_FROM_ME_MESSAGES=true`
-	- `ADMIN_JIDS=<your_jid@s.whatsapp.net>`
-	- `ALLOWED_GROUPS_FILE=allowed-groups.json`
-	- `ALLOWED_CHATS_FILE=allowed-chats.json`
+   - `GROQ_API_KEY`
+   - `GROQ_MODEL=llama-3.3-70b-versatile`
+   - `ALLOW_FROM_ME_MESSAGES=true`
+   - `ADMIN_JIDS=<your_jid@s.whatsapp.net>`
+   - `ALLOWED_GROUPS_FILE=allowed-groups.json`
+   - `ALLOWED_CHATS_FILE=allowed-chats.json`
 
 ### First deploy notes
 

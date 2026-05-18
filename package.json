@@ -2,9 +2,11 @@
   "name": "parag",
   "version": "1.0.0",
   "description": "",
-  "main": "bot.js",
+  "main": "dist/bot.js",
   "scripts": {
-    "start": "node bot.js",
+    "build": "tsc",
+    "start": "node dist/bot.js",
+    "dev": "tsc && node --watch dist/bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,9 +15,19 @@
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc11",
     "dotenv": "^17.4.2",
+    "groq-sdk": "^0.5.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
     "pino": "^10.3.1",
     "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.19.41",
+    "@types/pg": "^8.20.0",
+    "@types/qrcode-terminal": "^0.12.2",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
   }
 }

@@ -3,7 +3,7 @@ services:
     name: parag-whatsapp-bot
     runtime: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
