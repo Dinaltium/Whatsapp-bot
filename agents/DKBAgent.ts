@@ -293,7 +293,25 @@ async function handleEventDetailCommand(query: string): Promise<string> {
     if (!explicitMonth) {
       const globalMatches = await searchEventsGlobally(searchName);
       if (globalMatches.length > 0) {
-        match = globalMatches[0];
+        // Prioritize case-insensitive exact title match
+        const exactMatch = globalMatches.find(
+          (e) => e.title.toLowerCase() === searchName.toLowerCase(),
+        );
+        if (exactMatch) {
+          match = exactMatch;
+        } else if (globalMatches.length > 1) {
+          // Multiple matches found! Present a choice list to the user
+          const lines: string[] = [];
+          lines.push(`Multiple events found matching "${searchName}":\n`);
+          globalMatches.forEach((e, idx) => {
+            const dateStr = e.date ? ` (${e.date})` : "";
+            lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
+          });
+          lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+          return lines.join("\n");
+        } else {
+          match = globalMatches[0];
+        }
       }
     }
 
@@ -303,33 +321,92 @@ async function handleEventDetailCommand(query: string): Promise<string> {
       let eventsList = await getEventsForMonth(targetMonth);
 
       let normQuery = searchName.toLowerCase();
-      match = eventsList.find(
+      const localMatches = eventsList.filter(
         (e) =>
           e.title.toLowerCase().includes(normQuery) ||
           (e.host && e.host.toLowerCase().includes(normQuery)),
       );
+
+      if (localMatches.length > 0) {
+        const exactMatch = localMatches.find(
+          (e) => e.title.toLowerCase() === normQuery,
+        );
+        if (exactMatch) {
+          match = exactMatch;
+        } else if (localMatches.length > 1) {
+          // Multiple local matches
+          const lines: string[] = [];
+          lines.push(`Multiple events found matching "${searchName}" in ${targetMonth}:\n`);
+          localMatches.forEach((e, idx) => {
+            const dateStr = e.date ? ` (${e.date})` : "";
+            lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
+          });
+          lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+          return lines.join("\n");
+        } else {
+          match = localMatches[0];
+        }
+      }
 
       // If not found in targetMonth, let's search current month (if different)
       if (!match) {
         const currentMonth = normalizeMonthYear("");
         if (targetMonth !== currentMonth) {
           eventsList = await getEventsForMonth(currentMonth, false);
-          match = eventsList.find(
+          const currentMatches = eventsList.filter(
             (e) =>
               e.title.toLowerCase().includes(normQuery) ||
               (e.host && e.host.toLowerCase().includes(normQuery)),
           );
+          if (currentMatches.length > 0) {
+            const exactMatch = currentMatches.find(
+              (e) => e.title.toLowerCase() === normQuery,
+            );
+            if (exactMatch) {
+              match = exactMatch;
+            } else if (currentMatches.length > 1) {
+              const lines: string[] = [];
+              lines.push(`Multiple events found matching "${searchName}" in ${currentMonth}:\n`);
+              currentMatches.forEach((e, idx) => {
+                const dateStr = e.date ? ` (${e.date})` : "";
+                lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
+              });
+              lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+              return lines.join("\n");
+            } else {
+              match = currentMatches[0];
+            }
+          }
         }
       }
 
       // Fallback search to "apr-2026"
       if (!match && targetMonth !== "apr-2026") {
         eventsList = await getEventsForMonth("apr-2026", false);
-        match = eventsList.find(
+        const fallbackMatches = eventsList.filter(
           (e) =>
             e.title.toLowerCase().includes(normQuery) ||
             (e.host && e.host.toLowerCase().includes(normQuery)),
         );
+        if (fallbackMatches.length > 0) {
+          const exactMatch = fallbackMatches.find(
+            (e) => e.title.toLowerCase() === normQuery,
+          );
+          if (exactMatch) {
+            match = exactMatch;
+          } else if (fallbackMatches.length > 1) {
+            const lines: string[] = [];
+            lines.push(`Multiple events found matching "${searchName}" in April 2026:\n`);
+            fallbackMatches.forEach((e, idx) => {
+              const dateStr = e.date ? ` (${e.date})` : "";
+              lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
+            });
+            lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+            return lines.join("\n");
+          } else {
+            match = fallbackMatches[0];
+          }
+        }
       }
     }
 
