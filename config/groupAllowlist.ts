@@ -65,6 +65,32 @@ function ensureLoaded(): void {
   allowedGroups = Array.from(uniqueMap.values());
 }
 
+async function init(): Promise<void> {
+  const envEntries = loadFromEnv();
+  const filePath = process.env.ALLOWED_GROUPS_FILE || "allowed-groups.json";
+  const fileEntries = filePath ? loadFromFile(filePath) : [];
+
+  let dbEntries: GroupEntry[] = [];
+  try {
+    const { getAllowedGroups } = await import("../storage/dk24Store");
+    const dbRows = await getAllowedGroups();
+    dbEntries = dbRows.map((e) => ({ jid: e.jid, botNumber: e.bot_number }));
+  } catch (error) {
+    console.warn("⚠️ Failed to load allowed groups from Neon DB:", error);
+  }
+
+  allowedGroups = [...envEntries, ...fileEntries, ...dbEntries];
+
+  // deduplicate by jid, keeping the last entry
+  const uniqueMap = new Map<string, GroupEntry>();
+  for (const entry of allowedGroups) {
+    if (entry.jid.trim()) {
+      uniqueMap.set(entry.jid.trim(), entry);
+    }
+  }
+  allowedGroups = Array.from(uniqueMap.values());
+}
+
 function getGroupBot(
   jid: string | null | undefined,
 ): { botNumber: number } | null {
@@ -106,10 +132,10 @@ function listGroups(): GroupEntry[] {
   return allowedGroups!.map((g) => ({ jid: g.jid, botNumber: g.botNumber }));
 }
 
-function addGroup(
+async function addGroup(
   jid: string | null | undefined,
   botNumber: number = 0,
-): boolean {
+): Promise<boolean> {
   if (!jid || !jid.endsWith("@g.us")) return false;
 
   ensureLoaded();
@@ -121,10 +147,21 @@ function addGroup(
     allowedGroups!.push({ jid, botNumber });
   }
 
-  return writeToFile(getStorageFile(), allowedGroups!);
+  // 1. Local file write
+  const fileOk = writeToFile(getStorageFile(), allowedGroups!);
+
+  // 2. DB write
+  try {
+    const { addAllowedGroup } = await import("../storage/dk24Store");
+    await addAllowedGroup(jid, botNumber);
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist added group ${jid} to DB:`, error);
+  }
+
+  return fileOk;
 }
 
-function removeGroup(jid: string | null | undefined): boolean {
+async function removeGroup(jid: string | null | undefined): Promise<boolean> {
   if (!jid || !jid.endsWith("@g.us")) return false;
 
   ensureLoaded();
@@ -133,10 +170,22 @@ function removeGroup(jid: string | null | undefined): boolean {
   if (index === -1) return false;
   allowedGroups!.splice(index, 1);
 
-  return writeToFile(getStorageFile(), allowedGroups!);
+  // 1. Local file write
+  const fileOk = writeToFile(getStorageFile(), allowedGroups!);
+
+  // 2. DB write
+  try {
+    const { removeAllowedGroup } = await import("../storage/dk24Store");
+    await removeAllowedGroup(jid);
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist removed group ${jid} from DB:`, error);
+  }
+
+  return fileOk;
 }
 
 export default {
+  init,
   getGroupBot,
   isGroupAllowed,
   listGroups,

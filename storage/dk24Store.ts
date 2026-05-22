@@ -164,6 +164,18 @@ export async function ensureSchema(): Promise<void> {
       ALTER TABLE dk24_mentors ADD COLUMN IF NOT EXISTS email TEXT;
       ALTER TABLE dk24_mentors ADD COLUMN IF NOT EXISTS phone TEXT;
       ALTER TABLE dk24_mentors ALTER COLUMN expertise DROP NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS wa_allowed_groups (
+        jid TEXT PRIMARY KEY,
+        bot_number INTEGER NOT NULL DEFAULT 0,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS wa_allowed_chats (
+        jid TEXT PRIMARY KEY,
+        bot_number INTEGER NOT NULL DEFAULT 0,
+        added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
     console.log("✅ dk24Store database schema verified.");
   } catch (error) {
@@ -1053,3 +1065,112 @@ function triggerBackgroundEventsScrape(monthYear: string): void {
       );
     });
 }
+
+export interface DbGroupEntry {
+  jid: string;
+  bot_number: number;
+}
+
+export interface DbChatEntry {
+  jid: string;
+  bot_number: number;
+}
+
+export async function getAllowedGroups(): Promise<DbGroupEntry[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const res = await pool.query(
+      `SELECT jid, bot_number FROM wa_allowed_groups`
+    );
+    return res.rows.map((row) => ({
+      jid: row.jid,
+      bot_number: row.bot_number,
+    }));
+  } catch (error) {
+    console.error("⚠️ Error getting allowed groups from DB:", error);
+    return [];
+  }
+}
+
+export async function addAllowedGroup(jid: string, botNumber: number): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  try {
+    await pool.query(
+      `INSERT INTO wa_allowed_groups (jid, bot_number)
+       VALUES ($1, $2)
+       ON CONFLICT (jid) DO UPDATE SET bot_number = EXCLUDED.bot_number`,
+      [jid, botNumber],
+    );
+    return true;
+  } catch (error) {
+    console.error(`⚠️ Error adding allowed group ${jid} to DB:`, error);
+    return false;
+  }
+}
+
+export async function removeAllowedGroup(jid: string): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  try {
+    await pool.query(
+      `DELETE FROM wa_allowed_groups WHERE jid = $1`,
+      [jid],
+    );
+    return true;
+  } catch (error) {
+    console.error(`⚠️ Error removing allowed group ${jid} from DB:`, error);
+    return false;
+  }
+}
+
+export async function getAllowedChats(): Promise<DbChatEntry[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const res = await pool.query(
+      `SELECT jid, bot_number FROM wa_allowed_chats`
+    );
+    return res.rows.map((row) => ({
+      jid: row.jid,
+      bot_number: row.bot_number,
+    }));
+  } catch (error) {
+    console.error("⚠️ Error getting allowed chats from DB:", error);
+    return [];
+  }
+}
+
+export async function addAllowedChat(jid: string, botNumber: number): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  try {
+    await pool.query(
+      `INSERT INTO wa_allowed_chats (jid, bot_number)
+       VALUES ($1, $2)
+       ON CONFLICT (jid) DO UPDATE SET bot_number = EXCLUDED.bot_number`,
+      [jid, botNumber],
+    );
+    return true;
+  } catch (error) {
+    console.error(`⚠️ Error adding allowed chat ${jid} to DB:`, error);
+    return false;
+  }
+}
+
+export async function removeAllowedChat(jid: string): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  try {
+    await pool.query(
+      `DELETE FROM wa_allowed_chats WHERE jid = $1`,
+      [jid],
+    );
+    return true;
+  } catch (error) {
+    console.error(`⚠️ Error removing allowed chat ${jid} from DB:`, error);
+    return false;
+  }
+}
+

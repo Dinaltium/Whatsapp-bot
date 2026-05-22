@@ -83,6 +83,36 @@ function ensureLoaded(): void {
   allowedChats = Array.from(uniqueMap.values());
 }
 
+async function init(): Promise<void> {
+  const envEntries = loadFromEnv();
+  const filePath = process.env.ALLOWED_CHATS_FILE || "allowed-chats.json";
+  const fileEntries = filePath ? loadFromFile(filePath) : [];
+
+  let dbEntries: ChatEntry[] = [];
+  try {
+    const { getAllowedChats } = await import("../storage/dk24Store");
+    const dbRows = await getAllowedChats();
+    dbEntries = dbRows.map((e) => ({ jid: e.jid, botNumber: e.bot_number }));
+  } catch (error) {
+    console.warn("⚠️ Failed to load allowed chats from Neon DB:", error);
+  }
+
+  allowedChats = [...envEntries, ...fileEntries, ...dbEntries];
+
+  // deduplicate by normalized jid, keeping the last entry
+  const uniqueMap = new Map<string, ChatEntry>();
+  for (const entry of allowedChats) {
+    const normalized = normalizeChatJid(entry.jid) || entry.jid;
+    if (normalized.trim()) {
+      uniqueMap.set(normalized.trim(), {
+        jid: normalized,
+        botNumber: entry.botNumber,
+      });
+    }
+  }
+  allowedChats = Array.from(uniqueMap.values());
+}
+
 function getChatBot(
   jid: string | null | undefined,
 ): { botNumber: number } | null {
@@ -140,10 +170,10 @@ function listChats(): ChatEntry[] {
   return allowedChats!.map((c) => ({ jid: c.jid, botNumber: c.botNumber }));
 }
 
-function addChat(
+async function addChat(
   jid: string | null | undefined,
   botNumber: number = 0,
-): boolean {
+): Promise<boolean> {
   if (!jid) return false;
 
   ensureLoaded();
@@ -160,10 +190,21 @@ function addChat(
     allowedChats!.push({ jid: normalized, botNumber });
   }
 
-  return writeToFile(getStorageFile(), allowedChats!);
+  // 1. Local file write
+  const fileOk = writeToFile(getStorageFile(), allowedChats!);
+
+  // 2. DB write
+  try {
+    const { addAllowedChat } = await import("../storage/dk24Store");
+    await addAllowedChat(normalized, botNumber);
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist added chat ${normalized} to DB:`, error);
+  }
+
+  return fileOk;
 }
 
-function removeChat(jid: string | null | undefined): boolean {
+async function removeChat(jid: string | null | undefined): Promise<boolean> {
   if (!jid) return false;
 
   ensureLoaded();
@@ -177,10 +218,22 @@ function removeChat(jid: string | null | undefined): boolean {
   if (index === -1) return false;
   allowedChats!.splice(index, 1);
 
-  return writeToFile(getStorageFile(), allowedChats!);
+  // 1. Local file write
+  const fileOk = writeToFile(getStorageFile(), allowedChats!);
+
+  // 2. DB write
+  try {
+    const { removeAllowedChat } = await import("../storage/dk24Store");
+    await removeAllowedChat(normalized);
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist removed chat ${normalized} from DB:`, error);
+  }
+
+  return fileOk;
 }
 
 export default {
+  init,
   getChatBot,
   isChatAllowed,
   listChats,

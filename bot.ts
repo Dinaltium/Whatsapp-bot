@@ -431,6 +431,10 @@ async function startBot(): Promise<void> {
     try {
       authStore = await useNeonAuthState("parag");
       console.log("✅ Using Neon PostgreSQL for auth state storage.");
+
+      // Bootstrap PostgreSQL schemas
+      const { ensureSchema } = await import("./storage/dk24Store");
+      await ensureSchema();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`🚨 FATAL: Neon auth storage unavailable (${message}).`);
@@ -441,6 +445,12 @@ async function startBot(): Promise<void> {
     console.error("🚨 FATAL: DATABASE_URL not found, cannot connect to Neon.");
     process.exit(1);
   }
+
+  // Load allowlists from Database (with env/file fallback) on startup
+  console.log("⏳ Initializing group and chat allowlists...");
+  await groupConfig.init();
+  await chatConfig.init();
+  console.log("✅ Allowlists initialized.");
 
   const { state, saveCreds } = authStore;
 
@@ -724,7 +734,7 @@ async function startBot(): Promise<void> {
           target = normalizeJid(target) as string;
 
           if (cmdName === "addgroup") {
-            const ok = groupConfig.addGroup(
+            const ok = await groupConfig.addGroup(
               target,
               isNaN(botNumber) ? 0 : botNumber,
             );
@@ -745,7 +755,7 @@ async function startBot(): Promise<void> {
           }
 
           if (cmdName === "rmgroup") {
-            const ok = groupConfig.removeGroup(target);
+            const ok = await groupConfig.removeGroup(target);
             if (ok) {
               await sendBotReply(
                 sock,
@@ -806,7 +816,7 @@ async function startBot(): Promise<void> {
           target = normalizeJid(target) as string;
 
           if (cmdName === "addchat") {
-            const ok = chatConfig.addChat(
+            const ok = await chatConfig.addChat(
               target,
               isNaN(botNumber) ? 0 : botNumber,
             );
@@ -827,7 +837,7 @@ async function startBot(): Promise<void> {
           }
 
           if (cmdName === "rmchat") {
-            const ok = chatConfig.removeChat(target);
+            const ok = await chatConfig.removeChat(target);
             if (ok) {
               await sendBotReply(
                 sock,
@@ -863,7 +873,7 @@ async function startBot(): Promise<void> {
           if (target.endsWith("@g.us")) {
             const hasExisting = groupConfig.isGroupAllowed(target);
             if (hasExisting) {
-              const ok = groupConfig.addGroup(target, botNumber);
+              const ok = await groupConfig.addGroup(target, botNumber);
               if (ok) {
                 await sendBotReply(
                   sock,
@@ -887,7 +897,7 @@ async function startBot(): Promise<void> {
           } else {
             const hasExisting = chatConfig.isChatAllowed(target);
             if (hasExisting) {
-              const ok = chatConfig.addChat(target, botNumber);
+              const ok = await chatConfig.addChat(target, botNumber);
               if (ok) {
                 await sendBotReply(
                   sock,
