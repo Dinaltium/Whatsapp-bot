@@ -55,14 +55,9 @@ interface AgentResult {
   domainLocked?: boolean;
 }
 
-const DKB_HEADER = " ___    _   _  ___   \n" +
-"(  _`\\ ( ) ( )(  _`\\ \n" +
-"| | ) || |/'/'| (_) )\n" +
-"| | | )| , <  |  _ <'\n" +
-"| |_) || |\\`\\ | (_) )\n" +
-"(____/'(_) (_)(____/'\n" +
-"                     \n" +
-"                     ";
+const DKB_HEADER = String.raw`╺┳┓╻┏ ┏┓ 
+ ┃┃┣┻┓┣┻┓
+╺┻┛╹ ╹┗━┛`;
 
 const COMMUNITY_KEYWORDS = [
   "community",
