@@ -55,9 +55,10 @@ interface AgentResult {
   domainLocked?: boolean;
 }
 
-const DKB_HEADER = String.raw`╺┳┓╻┏ ┏┓ 
- ┃┃┣┻┓┣┻┓
-╺┻┛╹ ╹┗━┛`;
+const DKB_HEADER = String.raw`╔╦╗╦╔═╔╗ 
+ ║║╠╩╗╠╩╗
+═╩╝╩ ╩╚═╝
+`;
 
 const COMMUNITY_KEYWORDS = [
   "community",
@@ -315,7 +316,9 @@ async function handleEventDetailCommand(query: string): Promise<string> {
             const dateStr = e.date ? ` (${e.date})` : "";
             lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
           });
-          lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+          lines.push(
+            "\nTip: Type `!event <full-name>` to see details of a specific event!",
+          );
           return lines.join("\n");
         } else {
           match = globalMatches[0];
@@ -349,12 +352,16 @@ async function handleEventDetailCommand(query: string): Promise<string> {
         } else if (localMatches.length > 1) {
           // Multiple local matches
           const lines: string[] = [];
-          lines.push(`Multiple events found matching "${searchName}" in ${targetMonth}:\n`);
+          lines.push(
+            `Multiple events found matching "${searchName}" in ${targetMonth}:\n`,
+          );
           localMatches.forEach((e, idx) => {
             const dateStr = e.date ? ` (${e.date})` : "";
             lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
           });
-          lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+          lines.push(
+            "\nTip: Type `!event <full-name>` to see details of a specific event!",
+          );
           return lines.join("\n");
         } else {
           match = localMatches[0];
@@ -384,12 +391,16 @@ async function handleEventDetailCommand(query: string): Promise<string> {
               });
             } else if (currentMatches.length > 1) {
               const lines: string[] = [];
-              lines.push(`Multiple events found matching "${searchName}" in ${currentMonth}:\n`);
+              lines.push(
+                `Multiple events found matching "${searchName}" in ${currentMonth}:\n`,
+              );
               currentMatches.forEach((e, idx) => {
                 const dateStr = e.date ? ` (${e.date})` : "";
                 lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
               });
-              lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+              lines.push(
+                "\nTip: Type `!event <full-name>` to see details of a specific event!",
+              );
               return lines.join("\n");
             } else {
               match = currentMatches[0];
@@ -419,12 +430,16 @@ async function handleEventDetailCommand(query: string): Promise<string> {
             });
           } else if (fallbackMatches.length > 1) {
             const lines: string[] = [];
-            lines.push(`Multiple events found matching "${searchName}" in April 2026:\n`);
+            lines.push(
+              `Multiple events found matching "${searchName}" in April 2026:\n`,
+            );
             fallbackMatches.forEach((e, idx) => {
               const dateStr = e.date ? ` (${e.date})` : "";
               lines.push(`${idx + 1}. *${e.title}*${dateStr}`);
             });
-            lines.push("\nTip: Type `!event <full-name>` to see details of a specific event!");
+            lines.push(
+              "\nTip: Type `!event <full-name>` to see details of a specific event!",
+            );
             return lines.join("\n");
           } else {
             match = fallbackMatches[0];
@@ -478,8 +493,12 @@ async function handleEventDetailCommand(query: string): Promise<string> {
 
     if (otherMatchingTitles.length > 0) {
       lines.push("");
-      lines.push(`💡 Other matching events found: ${otherMatchingTitles.map((t) => `*${t}*`).join(", ")}`);
-      lines.push("Type `!event <full-name>` to see details of a specific event!");
+      lines.push(
+        `💡 Other matching events found: ${otherMatchingTitles.map((t) => `*${t}*`).join(", ")}`,
+      );
+      lines.push(
+        "Type `!event <full-name>` to see details of a specific event!",
+      );
     }
 
     return lines.join("\n");
@@ -526,13 +545,75 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
 
     // Extract search keywords from user prompt (filter out stop words)
     const stopWords = new Set([
-      "what", "is", "about", "event", "events", "the", "there", "in", "on", "at", 
-      "for", "of", "and", "to", "a", "an", "this", "that", "these", "those", 
-      "which", "who", "how", "why", "where", "when", "details", "detail", 
-      "info", "information", "can", "you", "me", "show", "list", "get", "any", 
-      "find", "search", "with", "from", "are", "here", "there", "is", "was", "were",
-      "be", "been", "being", "have", "has", "had", "do", "does", "did", "but", 
-      "by", "or", "as", "if", "then", "else", "so", "than", "too", "very", "s", "t"
+      "what",
+      "is",
+      "about",
+      "event",
+      "events",
+      "the",
+      "there",
+      "in",
+      "on",
+      "at",
+      "for",
+      "of",
+      "and",
+      "to",
+      "a",
+      "an",
+      "this",
+      "that",
+      "these",
+      "those",
+      "which",
+      "who",
+      "how",
+      "why",
+      "where",
+      "when",
+      "details",
+      "detail",
+      "info",
+      "information",
+      "can",
+      "you",
+      "me",
+      "show",
+      "list",
+      "get",
+      "any",
+      "find",
+      "search",
+      "with",
+      "from",
+      "are",
+      "here",
+      "there",
+      "is",
+      "was",
+      "were",
+      "be",
+      "been",
+      "being",
+      "have",
+      "has",
+      "had",
+      "do",
+      "does",
+      "did",
+      "but",
+      "by",
+      "or",
+      "as",
+      "if",
+      "then",
+      "else",
+      "so",
+      "than",
+      "too",
+      "very",
+      "s",
+      "t",
     ]);
 
     const words = userPrompt
@@ -581,9 +662,11 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
       .join("\n");
 
     if (globalMatches.length > 0) {
-      eventsStr += `\n\nRELEVANT MATCHING EVENTS FOUND FOR USER QUERY:\n` + globalMatches
-        .map(
-          (e) => `
+      eventsStr +=
+        `\n\nRELEVANT MATCHING EVENTS FOUND FOR USER QUERY:\n` +
+        globalMatches
+          .map(
+            (e) => `
   - ${e.title} (id: ${e.id})
     Host: ${e.host || "N/A"}
     Date: ${e.date || "N/A"}
@@ -594,8 +677,8 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
     Description: ${e.description || "N/A"}
     Tracks: ${e.tracks ? e.tracks.join(", ") : "N/A"}
   `,
-        )
-        .join("\n");
+          )
+          .join("\n");
     }
 
     const mentors = await getMentors();
