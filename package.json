@@ -4,7 +4,7 @@
   "description": "",
   "main": "dist/bot.js",
   "scripts": {
-    "build": "tsc",
+    "build": "npx puppeteer browsers install chrome && tsc",
     "start": "node dist/bot.js",
     "dev": "tsc && node --watch dist/bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
