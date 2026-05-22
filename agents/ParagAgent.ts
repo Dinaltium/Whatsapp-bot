@@ -22,6 +22,10 @@ interface AgentResult {
   domainLocked?: boolean;
 }
 
+const BOT_ASCII_BANNER = String.raw`░█▀█░█▀█░█▀▄░█▀█░█▀▀
+░█▀▀░█▀█░█▀▄░█▀█░█░█
+░▀░░░▀░▀░▀░▀░▀░▀░▀▀▀`;
+
 const TECH_KEYWORDS = [
   "code",
   "coding",
@@ -100,6 +104,14 @@ const IRRELEVANT_WORDS = [
   "altitude",
 ];
 
+function formatBotReply(text: string): string {
+  const cleanedText = String(text || "").trim();
+  if (!cleanedText) {
+    return BOT_ASCII_BANNER;
+  }
+  return `${BOT_ASCII_BANNER}\n\n${cleanedText}`;
+}
+
 function isTechOrHackathonQuery(query: string | null | undefined): boolean {
   if (!query) return false;
 
@@ -133,6 +145,7 @@ async function getGroqReply(
     "Answer only within software engineering, product prototyping, and hackathon execution.",
     "If the user asks outside those domains, politely refuse and redirect to tech/hackathon topics.",
     "Keep responses practical, actionable, and under 120 words unless detail is explicitly requested.",
+    "Do NOT use any emojis or emoticons in your responses under any circumstances. Keep responses in plain text.",
   ].join(" ");
 
   const messages: GroqMessageParam[] = conversationMessages.map((msg) => ({
@@ -141,7 +154,6 @@ async function getGroqReply(
   }));
 
   try {
-    // Use SDK if it exposes messages.create, otherwise fall back to HTTP API
     if ((client as any)?.messages?.create) {
       const response = (await (client as any).messages.create({
         model: groqModel,
@@ -159,7 +171,6 @@ async function getGroqReply(
       if (!trimmedText) throw new Error("Groq returned an empty response.");
       return trimmedText;
     } else {
-      // fallback: call Groq HTTP endpoint directly
       const fetchFn =
         (globalThis as any).fetch ?? (await import("node-fetch")).default;
       const res = await fetchFn(
@@ -205,16 +216,14 @@ async function handleMessage(
   const hasIrrelevant = IRRELEVANT_WORDS.some((w) => normalized.includes(w));
   const isTech = isTechOrHackathonQuery(userPrompt);
 
-  // Domain lock: only admins can bypass initial domain check
   if (!isTech && !session.domainUnlocked && !isAdmin) {
     return {
-      reply: getDomainRestrictionReply(),
+      reply: formatBotReply(getDomainRestrictionReply()),
       usedAI: false,
       domainLocked: true,
     };
   }
 
-  // Safety check: even tech queries with irrelevant keywords get special handling
   if (isTech && hasIrrelevant) {
     const reply = [
       "That question is outside my scope. I focus on software engineering, product prototyping, and hackathon execution.",
@@ -222,12 +231,11 @@ async function handleMessage(
       "Ignore external factors like mountain elevation shifts, as they don't impact Redis performance.",
     ].join(" ");
 
-    return { reply, usedAI: false };
+    return { reply: formatBotReply(reply), usedAI: false };
   }
 
-  // Call Groq for AI response
   const aiReply = await getGroqReply(session.messages, groqApiKey, groqModel);
-  return { reply: aiReply, usedAI: true };
+  return { reply: formatBotReply(aiReply), usedAI: true };
 }
 
 export default {

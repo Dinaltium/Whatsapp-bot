@@ -1,7 +1,35 @@
+# Dependencies
 node_modules/
-auth/
+
+# Build output
 dist/
+
+# Auth state (session keys - never commit)
+auth/
+
+# Environment secrets
 .env
+.env.local
+.env.*.local
+
+# Runtime config (allowlists managed per-deploy)
 allowed-groups.json
 allowedGroups.json
 allowed-chats.json
+
+# Scratch / one-off dev scripts
+scratch/
+
+# Root-level test/debug files
+test_scraping.js
+test_scraping.ts
+
+# Temp website artifacts
+temp-website/
+
+# Editor & OS noise
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

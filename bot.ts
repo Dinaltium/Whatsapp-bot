@@ -41,6 +41,23 @@ interface UserSession {
   domainUnlocked: boolean;
   lastActiveAt: number;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
+  lastQuery?: { type: "mentors"; filter?: string; page: number };
+  pendingMentor?: {
+    name: string;
+    organization: string;
+    description?: string;
+    expertise?: string;
+    linkedin?: string;
+    instagram?: string;
+    github?: string;
+    email?: string;
+    phoneNoCountryCode: string;
+  };
+  pendingEdit?: {
+    mentorId: number;
+    flag: string;
+    phoneNoCountryCode: string;
+  };
 }
 
 interface RateLimitNotice {
@@ -53,9 +70,7 @@ const userAiRateLimitNotices = new Map<string, RateLimitNotice>();
 const userAiSessions = new Map<string, UserSession>();
 let isHealthServerStarted = false;
 
-const BOT_ASCII_BANNER = String.raw`░█▀█░█▀█░█▀▄░█▀█░█▀▀
-░█▀▀░█▀█░█▀▄░█▀█░█░█
-░▀░░░▀░▀░▀░▀░▀░▀░▀▀▀`;
+
 
 function startHealthServer(): void {
   if (isHealthServerStarted) {
@@ -93,17 +108,7 @@ function startHealthServer(): void {
 }
 
 function printBanner(): void {
-  console.log(`\n${BOT_ASCII_BANNER}`);
-}
-
-function formatBotReply(text: string): string {
-  const cleanedText = String(text || "").trim();
-
-  if (!cleanedText) {
-    return `${BOT_ASCII_BANNER}`;
-  }
-
-  return `${BOT_ASCII_BANNER}\n\n${cleanedText}`;
+  console.log("\n🤖 WhatsApp Bot Coordinator Online.");
 }
 
 async function sendBotReply(
@@ -112,7 +117,7 @@ async function sendBotReply(
   text: string,
 ): Promise<void> {
   await sock.sendMessage(to, {
-    text: formatBotReply(text),
+    text: String(text || "").trim(),
   });
 }
 
@@ -141,7 +146,11 @@ function shouldSkipMessage(
   from: string | null | undefined,
   text: string | null,
 ): boolean {
-  if (!msg?.message) return true;
+  const msgId = msg.key?.id || "unknown";
+
+  if (!msg?.message) {
+    return true;
+  }
 
   const normalizedText = String(text || "")
     .trim()
@@ -149,37 +158,84 @@ function shouldSkipMessage(
   const commandName = normalizedText.startsWith(COMMAND_PREFIX)
     ? normalizedText.slice(COMMAND_PREFIX.length).split(/\s+/)[0]
     : "";
+
+  const isCommand = normalizedText.startsWith(COMMAND_PREFIX);
   const isAdmin = isAdminSender(msg);
+
+  // Public utility commands that can be run in any group or DM (even unapproved ones)
+  const publicExemptCommands = ["getjid", "whoami"];
+
   const adminOnlyCommands = [
-    "getjid",
-    "whoami",
     "addgroup",
     "rmgroup",
     "listgroups",
     "addchat",
     "rmchat",
     "listchats",
+    "manage",
   ];
 
+  if (isCommand) {
+    console.log(`[DEBUG] 📩 Potential command detected: "${text}" from JID: "${from}" (IsAdmin: ${isAdmin}, MsgId: ${msgId})`);
+  }
+
   if (adminOnlyCommands.includes(commandName)) {
-    return !isAdmin;
+    if (!isAdmin) {
+      console.log(`[DEBUG] ❌ Skipped command '${commandName}': Administrative permission required (sender is not admin).`);
+      return true;
+    }
   }
 
-  if (msg.key?.fromMe && !ALLOW_FROM_ME_MESSAGES) return true;
-
-  if (!from || from === "status@broadcast") return true;
-
-  if (from.endsWith("@g.us")) {
-    if (!groupConfig.isGroupAllowed(from)) return true;
-  } else {
-    if (!chatConfig.isChatAllowed(from)) return true;
+  if (msg.key?.fromMe && !ALLOW_FROM_ME_MESSAGES) {
+    if (isCommand) {
+      console.log(`[DEBUG] ❌ Skipped command '${commandName}': Message is from self (fromMe = true) and ALLOW_FROM_ME_MESSAGES is disabled.`);
+    }
+    return true;
   }
 
-  if (msg.message?.protocolMessage) return true;
-  if (!text) return true;
+  if (!from) {
+    if (isCommand) {
+      console.log(`[DEBUG] ❌ Skipped command '${commandName}': Remote JID (from) is missing.`);
+    }
+    return true;
+  }
 
-  if (!text.startsWith(COMMAND_PREFIX)) return true;
+  if (from === "status@broadcast") {
+    return true;
+  }
 
+  // Only verify allowlists if the command is not publicExempt and not an adminOnlyCommand
+  if (!publicExemptCommands.includes(commandName) && !adminOnlyCommands.includes(commandName)) {
+    if (from.endsWith("@g.us")) {
+      if (!groupConfig.isGroupAllowed(from)) {
+        if (isCommand) {
+          console.log(`[DEBUG] ❌ Skipped command '${commandName}': Group JID "${from}" is not in groupConfig allowlist.`);
+        }
+        return true;
+      }
+    } else {
+      if (!chatConfig.isChatAllowed(from)) {
+        if (isCommand) {
+          console.log(`[DEBUG] ❌ Skipped command '${commandName}': Chat JID "${from}" is not in chatConfig allowlist.`);
+        }
+        return true;
+      }
+    }
+  }
+
+  if (msg.message?.protocolMessage) {
+    return true;
+  }
+
+  if (!text) {
+    return true;
+  }
+
+  if (!text.startsWith(COMMAND_PREFIX)) {
+    return true;
+  }
+
+  console.log(`[DEBUG] 🎯 Command matches rules and is approved for processing: "${text}"`);
   return false;
 }
 
@@ -394,6 +450,7 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    console.log(`[DEBUG] 🔄 Connection state transition: connection = "${connection || 'N/A'}", qrCodePresent = ${!!qr}`);
 
     if (qr) {
       qrcode.generate(qr, {
@@ -432,7 +489,8 @@ async function startBot(): Promise<void> {
     }
   });
 
-  sock.ev.on("messages.upsert", async ({ messages }) => {
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    console.log(`[DEBUG] 📡 Received messages.upsert event (type: "${type}", messageCount: ${messages.length})`);
     for (const msg of messages) {
       const from = msg.key?.remoteJid;
       const textRaw = extractMessageText(msg.message);
@@ -461,7 +519,54 @@ async function startBot(): Promise<void> {
       console.log("📩", command);
 
       if (command === "!ping") {
-        await sendBotReply(sock, from || "", "pong 🗿");
+        await sendBotReply(sock, from || "", "pong");
+        continue;
+      }
+
+      if (command === "!help") {
+        let helpText = "";
+        if (botNumber === 1) {
+          helpText = [
+            "ECB - EmbedClub Assistant",
+            "Available Commands:",
+            "• !ping - Check bot response and status",
+            "• !hello - Check bot availability",
+            "• !reset - Reset your conversation context",
+            "• !<question> - Ask about ECB events, hardware/embedded activities, and community guidelines",
+          ].join("\n");
+        } else if (botNumber === 2) {
+          helpText = [
+            "DKB - DK24 (Developer Kommunity 24) Assistant",
+            "Available Commands:",
+            "• !ping - Check bot response and status",
+            "• !hello - Check bot availability",
+            "• !reset - Reset your conversation context",
+            "• !clubs - List all official member communities in the DK24 network",
+            "• !club <name> - Get detailed spotlight card for a specific member community",
+            "• !events [monthYear] - List chronological events (e.g. !events may-2026)",
+            "• !event <name> - Get details, timeline, and registration links for an event",
+            "• !mentors [page] - List mentors in alphabetical order (10 per page)",
+            "• !mentor -id <id> - View full details for a specific mentor by ID",
+            "• !mentor -f <letter_or_query> [page] - Filter mentors by name",
+            "• !next - View the next page of mentors from your active query",
+            "• !page <number> - View a specific page of mentors from your active query",
+            "• !addmentor -n <name> -o <org> [-d <desc>] [-ex <expertise>] [-l <linkedin>] [-i <instagram>] [-g <github>] [-e <email>] [-p <phone>] - Add a mentor (Authorized only)",
+            "• !editmentor <id> -<flag> <value> - Update a single field on a mentor (Authorized only)",
+            "• !delmentor <id_or_name> - Remove a mentor (Authorized only)",
+            "• !<question> - Chat directly with DKB (e.g. !What is a good way to host an AI meetup?)",
+          ].join("\n");
+        } else {
+          // Default to Bot 0 (PARAG)
+          helpText = [
+            "PARAG - Technology and Hackathon Assistant",
+            "Available Commands:",
+            "• !ping - Check bot response and status",
+            "• !hello - Check bot availability",
+            "• !reset - Reset your conversation context",
+            "• !<question> - Chat directly with PARAG (e.g. !How do I optimize API latency?)",
+          ].join("\n");
+        }
+        await sendBotReply(sock, from || "", helpText);
         continue;
       }
 
@@ -559,7 +664,7 @@ async function startBot(): Promise<void> {
           } else {
             const formatted = list.map((entry) => {
               const botLabel =
-                entry.botNumber === 1 ? "Embedclub" : "Tech/Hackathon";
+                entry.botNumber === 1 ? "ECB" : entry.botNumber === 2 ? "DKB" : "PARAG";
               return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
             });
             await sendBotReply(
@@ -579,7 +684,7 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !${cmdName} <group-jid> [bot-number]\nBot 0: Tech/Hackathon | Bot 1: Embedclub`,
+              `Usage: !${cmdName} <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB`,
             );
             continue;
           }
@@ -637,7 +742,7 @@ async function startBot(): Promise<void> {
           } else {
             const formatted = list.map((entry) => {
               const botLabel =
-                entry.botNumber === 1 ? "Embedclub" : "Tech/Hackathon";
+                entry.botNumber === 1 ? "ECB" : entry.botNumber === 2 ? "DKB" : "PARAG";
               return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
             });
             await sendBotReply(
@@ -657,7 +762,7 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !${cmdName} <chat-jid> [bot-number]\nBot 0: Tech/Hackathon | Bot 1: Embedclub`,
+              `Usage: !${cmdName} <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB`,
             );
             continue;
           }
@@ -705,6 +810,62 @@ async function startBot(): Promise<void> {
         }
       }
 
+      if (cmdName === "manage") {
+        if (!isAdminAction()) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Unauthorized: admin privileges required for that command."
+          );
+          continue;
+        }
+
+        const work = cmdArgs[0];
+        const numInput = cmdArgs[1];
+
+        if (!work || !numInput) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Usage: !manage <work> <+phone_number>\nExample: !manage mentor +919902849280"
+          );
+          continue;
+        }
+
+        const normalizedWork = work.trim().toLowerCase();
+        const numberMatch = numInput.trim().match(/^\+(\d{7,15})$/);
+
+        if (!numberMatch) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Error: Phone number must start with + followed by country code and number, and contain no spaces.\nFormat: +{country_code}{number}\nExample: +919902849280"
+          );
+          continue;
+        }
+
+        const rawPhone = numberMatch[1];
+        const targetJid = `${rawPhone}@s.whatsapp.net`;
+
+        const { addManagedRole } = await import("./storage/dk24Store");
+        const ok = await addManagedRole(targetJid, normalizedWork);
+
+        if (ok) {
+          await sendBotReply(
+            sock,
+            from || "",
+            `Successfully assigned role "${normalizedWork}" to ${numInput}.`
+          );
+        } else {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Failed to assign role. Ensure the database connection is healthy."
+          );
+        }
+        continue;
+      }
+
       const rateLimitCheck = checkAiRateLimit(from || "", senderId);
 
       if (!rateLimitCheck.allowed) {
@@ -731,6 +892,7 @@ async function startBot(): Promise<void> {
           GROQ_MODEL,
           botNumber,
           isAdminSender(msg),
+          senderId,
         );
 
         if (agentResult.domainLocked) {
