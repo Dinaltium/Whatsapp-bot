@@ -13,6 +13,7 @@ import {
   Mentor,
   getMentorById,
   updateMentorField,
+  searchEventsGlobally,
 } from "../storage/dk24Store";
 
 interface ConversationMessage {
@@ -269,6 +270,7 @@ async function handleEventDetailCommand(query: string): Promise<string> {
     // Parse for optional monthYear in the query (e.g. "hackfest apr-2026")
     let targetMonth = normalizeMonthYear(""); // default to current
     let searchName = trimmedQuery;
+    let explicitMonth = false;
 
     const monthRegex = /\b([a-z]{3,9})[\s-]*(\d{2,4})\b/i;
     const matchMonth = trimmedQuery.match(monthRegex);
@@ -277,44 +279,58 @@ async function handleEventDetailCommand(query: string): Promise<string> {
       targetMonth = normalizeMonthYear(matchMonth[0]);
       // Remove the month-year from the search term
       searchName = trimmedQuery.replace(matchMonth[0], "").trim();
+      explicitMonth = true;
     }
-
-    // Fetch events for target month
-    let eventsList = await getEventsForMonth(targetMonth);
 
     // If searchName is empty (e.g. user just typed `!event apr-2026`), treat it as `!events apr-2026`
     if (!searchName) {
       return await handleEventsCommand(targetMonth);
     }
 
-    let normQuery = searchName.toLowerCase();
-    let match = eventsList.find(
-      (e) =>
-        e.title.toLowerCase().includes(normQuery) ||
-        (e.host && e.host.toLowerCase().includes(normQuery)),
-    );
+    let match: Event | undefined;
 
-    // If not found in targetMonth, let's search current month (if different)
+    // Prioritize global cached database search if no month was explicitly requested
+    if (!explicitMonth) {
+      const globalMatches = await searchEventsGlobally(searchName);
+      if (globalMatches.length > 0) {
+        match = globalMatches[0];
+      }
+    }
+
+    // Fall back to target/current/apr-26 month search/scrapes if not matched globally or if month was explicit
     if (!match) {
-      const currentMonth = normalizeMonthYear("");
-      if (targetMonth !== currentMonth) {
-        eventsList = await getEventsForMonth(currentMonth);
+      // Fetch events for target month
+      let eventsList = await getEventsForMonth(targetMonth);
+
+      let normQuery = searchName.toLowerCase();
+      match = eventsList.find(
+        (e) =>
+          e.title.toLowerCase().includes(normQuery) ||
+          (e.host && e.host.toLowerCase().includes(normQuery)),
+      );
+
+      // If not found in targetMonth, let's search current month (if different)
+      if (!match) {
+        const currentMonth = normalizeMonthYear("");
+        if (targetMonth !== currentMonth) {
+          eventsList = await getEventsForMonth(currentMonth, false);
+          match = eventsList.find(
+            (e) =>
+              e.title.toLowerCase().includes(normQuery) ||
+              (e.host && e.host.toLowerCase().includes(normQuery)),
+          );
+        }
+      }
+
+      // Fallback search to "apr-2026"
+      if (!match && targetMonth !== "apr-2026") {
+        eventsList = await getEventsForMonth("apr-2026", false);
         match = eventsList.find(
           (e) =>
             e.title.toLowerCase().includes(normQuery) ||
             (e.host && e.host.toLowerCase().includes(normQuery)),
         );
       }
-    }
-
-    // Fallback search to "apr-2026"
-    if (!match && targetMonth !== "apr-2026") {
-      eventsList = await getEventsForMonth("apr-2026");
-      match = eventsList.find(
-        (e) =>
-          e.title.toLowerCase().includes(normQuery) ||
-          (e.host && e.host.toLowerCase().includes(normQuery)),
-      );
     }
 
     if (!match) {
@@ -369,7 +385,7 @@ async function handleEventDetailCommand(query: string): Promise<string> {
 
 async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
   try {
-    const clubs = await getClubs();
+    const clubs = await getClubs(false);
 
     // Always include current month
     const currentMonthYear = normalizeMonthYear("");
@@ -386,7 +402,7 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
 
     const allEvents: { month: string; events: Event[] }[] = [];
     for (const m of monthsToFetch) {
-      const evts = await getEventsForMonth(m);
+      const evts = await getEventsForMonth(m, false);
       if (evts.length > 0) {
         allEvents.push({ month: m, events: evts });
       } else {
@@ -791,8 +807,6 @@ async function handleMessage(
 ): Promise<AgentResult> {
   const trimmed = (userPrompt || "").trim();
   const lowerPrompt = trimmed.toLowerCase();
-
-  await ensureSchema();
 
   // ──────────────────────────────────────────────────────────────────────────
   // MULTI-TURN: Resolve pending country code for !addmentor

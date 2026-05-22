@@ -435,30 +435,67 @@ export function normalizeMonthYear(input: string): string {
 // Headless Crawlers (Puppeteer)
 // ----------------------------------------------------
 
-export async function scrapeClubsLive(): Promise<Club[]> {
-  console.log("🕷️ Launching Puppeteer to scrape communities...");
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-    ],
-  });
+// Global promise queue to serialize Puppeteer crawl executions
+let puppeteerQueue: Promise<any> = Promise.resolve();
 
+async function serializePuppeteer<T>(task: () => Promise<T>): Promise<T> {
+  const currentQueue = puppeteerQueue;
+  let resolveQueue: () => void;
+  const nextInQueue = new Promise<void>((resolve) => {
+    resolveQueue = resolve;
+  });
+  puppeteerQueue = nextInQueue;
   try {
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    );
-    await page.setViewport({ width: 1280, height: 1000 });
-    
-    console.log("🕷️ Navigating to communities...");
-    const response = await page.goto("https://dk24.org/communities", {
-      waitUntil: "networkidle2",
+    await currentQueue;
+  } catch (err) {
+    // Ignore errors from previous tasks in the queue to prevent deadlocking
+  }
+  try {
+    return await task();
+  } finally {
+    resolveQueue!();
+  }
+}
+
+export async function scrapeClubsLive(): Promise<Club[]> {
+  return serializePuppeteer(async () => {
+    console.log("🕷️ Launching Puppeteer to scrape communities...");
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--single-process",
+      ],
     });
+
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      );
+      await page.setViewport({ width: 1280, height: 1000 });
+      
+      // Speed up execution by blocking unneeded assets (images, stylesheets, fonts, media)
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        const type = req.resourceType();
+        if (["image", "stylesheet", "font", "media"].includes(type)) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
+      page.setDefaultNavigationTimeout(60000);
+      
+      console.log("🕷️ Navigating to communities...");
+      const response = await page.goto("https://dk24.org/communities", {
+        waitUntil: "networkidle2",
+        timeout: 60000,
+      });
     
     console.log(`🕷️ Response Status: ${response?.status() || "unknown"}`);
     console.log(`🕷️ Page Title: ${await page.title()}`);
@@ -609,33 +646,48 @@ export async function scrapeClubsLive(): Promise<Club[]> {
   } finally {
     await browser.close();
   }
+});
 }
 
 export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
-  console.log(
-    `🕷️ Launching Puppeteer to scrape calendar events for [${monthYear}]...`,
-  );
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-    ],
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  return serializePuppeteer(async () => {
+    console.log(
+      `🕷️ Launching Puppeteer to scrape calendar events for [${monthYear}]...`,
     );
-    await page.setViewport({ width: 1280, height: 1000 });
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--single-process",
+      ],
+    });
 
-    const url = `https://dk24.org/calendar?date=${monthYear}`;
-    console.log(`🕷️ Navigating to calendar: ${url}`);
-    const response = await page.goto(url, { waitUntil: "networkidle2" });
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      );
+      await page.setViewport({ width: 1280, height: 1000 });
+
+      // Speed up execution by blocking unneeded assets (images, stylesheets, fonts, media)
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        const type = req.resourceType();
+        if (["image", "stylesheet", "font", "media"].includes(type)) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
+      page.setDefaultNavigationTimeout(60000);
+
+      const url = `https://dk24.org/calendar?date=${monthYear}`;
+      console.log(`🕷️ Navigating to calendar: ${url}`);
+      const response = await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
     
     console.log(`🕷️ Response Status: ${response?.status() || "unknown"}`);
     console.log(`🕷️ Page Title: ${await page.title()}`);
@@ -835,6 +887,35 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
   } finally {
     await browser.close();
   }
+});
+}
+
+// In-flight promise caches to collapse multiple parallel crawls
+const inFlightClubsScrape = { promise: null as Promise<Club[]> | null };
+const inFlightEventsScrapes = new Map<string, Promise<Event[]>>();
+
+export async function getClubsLiveLocked(): Promise<Club[]> {
+  if (inFlightClubsScrape.promise) {
+    console.log("🔒 Clubs scrape already in flight. Reusing existing promise...");
+    return inFlightClubsScrape.promise;
+  }
+  inFlightClubsScrape.promise = scrapeClubsLive().finally(() => {
+    inFlightClubsScrape.promise = null;
+  });
+  return inFlightClubsScrape.promise;
+}
+
+export async function getEventsLiveLocked(monthYear: string): Promise<Event[]> {
+  let promise = inFlightEventsScrapes.get(monthYear);
+  if (promise) {
+    console.log(`🔒 Events scrape for ${monthYear} already in flight. Reusing existing promise...`);
+    return promise;
+  }
+  promise = scrapeEventsLive(monthYear).finally(() => {
+    inFlightEventsScrapes.delete(monthYear);
+  });
+  inFlightEventsScrapes.set(monthYear, promise);
+  return promise;
 }
 
 // ----------------------------------------------------
@@ -884,35 +965,36 @@ async function markCacheUpdated(key: string): Promise<void> {
 }
 
 // Get Clubs dynamically (reads from Neon with background/foreground scrape logic)
-export async function getClubs(): Promise<Club[]> {
+export async function getClubs(allowScrape: boolean = true): Promise<Club[]> {
   const pool = getPool();
   if (!pool) {
+    if (!allowScrape) {
+      return [];
+    }
     console.warn("⚠️ No database configured. Scraping clubs live directly...");
     try {
-      return await scrapeClubsLive();
+      return await getClubsLiveLocked();
     } catch (err) {
       return [];
     }
   }
 
   try {
-    // 1. Check cache freshness
-    const fresh = await isCacheValid("clubs");
-
-    // 2. Fetch current DB clubs
+    // 1. Fetch current DB clubs
     const dbClubs = await pool.query(`
       SELECT id, name, college, description, website, logo, pocs, representatives 
       FROM dk24_clubs ORDER BY id ASC
     `);
 
-    if (fresh && dbClubs.rows.length > 0) {
+    if (!allowScrape) {
       return dbClubs.rows as Club[];
-    } else if (fresh && dbClubs.rows.length === 0) {
-      console.log(
-        "♻️ Clubs cache is fresh but empty. Firing background re-check...",
-      );
-      triggerBackgroundClubsScrape();
-      return [];
+    }
+
+    // 2. Check cache freshness
+    const fresh = await isCacheValid("clubs");
+
+    if (fresh) {
+      return dbClubs.rows as Club[];
     }
 
     if (dbClubs.rows.length > 0) {
@@ -926,14 +1008,17 @@ export async function getClubs(): Promise<Club[]> {
 
     // Foreground scrape since database is completely empty
     console.log("🔍 Clubs database is empty. Running foreground scraping...");
-    const liveClubs = await scrapeClubsLive();
+    const liveClubs = await getClubsLiveLocked();
     await saveClubsToDb(liveClubs);
     await markCacheUpdated("clubs");
     return liveClubs;
   } catch (error) {
     console.error("⚠️ getClubs DB error. Scraping live:", error);
+    if (!allowScrape) {
+      return [];
+    }
     try {
-      return await scrapeClubsLive();
+      return await getClubsLiveLocked();
     } catch (err) {
       return [];
     }
@@ -978,7 +1063,7 @@ async function saveClubsToDb(clubs: Club[]): Promise<void> {
 
 function triggerBackgroundClubsScrape(): void {
   // Run asynchronously without blocking current process thread
-  scrapeClubsLive()
+  getClubsLiveLocked()
     .then(async (live) => {
       await saveClubsToDb(live);
       await markCacheUpdated("clubs");
@@ -990,15 +1075,21 @@ function triggerBackgroundClubsScrape(): void {
 }
 
 // Get Events dynamically (reads from Neon with background/foreground scrape logic)
-export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
+export async function getEventsForMonth(
+  monthYear: string,
+  allowScrape: boolean = true,
+): Promise<Event[]> {
   const normalized = normalizeMonthYear(monthYear);
   const pool = getPool();
   if (!pool) {
+    if (!allowScrape) {
+      return [];
+    }
     console.warn(
       `⚠️ No database configured. Scraping events live for ${normalized}...`,
     );
     try {
-      return await scrapeEventsLive(normalized);
+      return await getEventsLiveLocked(normalized);
     } catch (err) {
       return [];
     }
@@ -1007,8 +1098,6 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
   const cacheKey = `calendar:${normalized}`;
 
   try {
-    const fresh = await isCacheValid(cacheKey);
-
     const dbEvents = await pool.query(
       `
       SELECT id, title, host, date, location, description, registration_deadline, prize_pool, tracks, registration_link, join_link, youtube_link, poster_url, tags, stage, month_year
@@ -1017,13 +1106,13 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
       [normalized],
     );
 
+    if (!allowScrape) {
+      return dbEvents.rows as Event[];
+    }
+
+    const fresh = await isCacheValid(cacheKey);
+
     if (fresh) {
-      if (dbEvents.rows.length === 0) {
-        console.log(
-          `♻️ Events cache is young, but empty for ${normalized}. Firing background re-check...`,
-        );
-        triggerBackgroundEventsScrape(normalized);
-      }
       return dbEvents.rows as Event[];
     }
 
@@ -1036,11 +1125,11 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
       return dbEvents.rows as Event[];
     }
 
-    // No records exist: Run in foreground so the user receives a correct list
+    // No records exist and cache is NOT fresh: Run in foreground so the user receives a correct list
     console.log(
-      `🔍 Events database empty for ${normalized}. Running foreground calendar scraping...`,
+      `🔍 Events database empty/missing cache for ${normalized}. Running foreground calendar scraping...`,
     );
-    const liveEvents = await scrapeEventsLive(normalized);
+    const liveEvents = await getEventsLiveLocked(normalized);
     await saveEventsToDb(liveEvents, normalized);
     await markCacheUpdated(cacheKey);
     return liveEvents;
@@ -1049,8 +1138,11 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
       `⚠️ getEventsForMonth DB error for ${normalized}. Scraping live:`,
       error,
     );
+    if (!allowScrape) {
+      return [];
+    }
     try {
-      return await scrapeEventsLive(normalized);
+      return await getEventsLiveLocked(normalized);
     } catch (err) {
       return [];
     }
@@ -1111,7 +1203,7 @@ async function saveEventsToDb(
 
 function triggerBackgroundEventsScrape(monthYear: string): void {
   const cacheKey = `calendar:${monthYear}`;
-  scrapeEventsLive(monthYear)
+  getEventsLiveLocked(monthYear)
     .then(async (live) => {
       await saveEventsToDb(live, monthYear);
       await markCacheUpdated(cacheKey);
@@ -1234,4 +1326,24 @@ export async function removeAllowedChat(jid: string): Promise<boolean> {
     return false;
   }
 }
+
+export async function searchEventsGlobally(query: string): Promise<Event[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const trimmed = query.trim().toLowerCase();
+    const res = await pool.query(
+      `SELECT id, title, host, date, location, description, registration_deadline, prize_pool, tracks, registration_link, join_link, youtube_link, poster_url, tags, stage, month_year 
+       FROM dk24_events 
+       WHERE LOWER(title) LIKE $1 OR LOWER(host) LIKE $1 
+       ORDER BY date DESC`,
+      [`%${trimmed}%`],
+    );
+    return res.rows as Event[];
+  } catch (error) {
+    console.error("⚠️ Error searching events globally:", error);
+    return [];
+  }
+}
+
 
