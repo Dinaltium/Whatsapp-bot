@@ -658,6 +658,7 @@ async function getGroqReply(
     "Your focus is to support developer collaboration, building AI-powered products, sharing cool hacks, learning machine learning, hosting meetups, and forming teams.",
     "Keep responses extremely positive, supportive of open-source and developer community building, practical, and under 120 words unless requested.",
     "Do NOT use any emojis or emoticons in your responses under any circumstances. Keep responses in plain text.",
+    "CRITICAL REQUIREMENT FOR AMBIGUOUS EVENT QUERIES: If the user asks about an event (e.g., 'devfest' or 'dev') but the provided context has multiple matching events with similar names (e.g., 'devfest 2025', 'devfest Kommunity', 'devops'), you MUST NOT pick just one or describe all of them in detail. Instead, you must respond by politely listing the names of all the matching events found in the context and asking the user explicitly: 'Which event do you want to know about?' or something similar.",
   ].join(" ");
 
   const dynamicContext = await buildDynamicContextPrompt(userPrompt);
