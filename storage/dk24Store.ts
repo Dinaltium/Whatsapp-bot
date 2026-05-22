@@ -704,6 +704,10 @@ export async function getClubs(): Promise<Club[]> {
     
     if (fresh && dbClubs.rows.length > 0) {
       return dbClubs.rows as Club[];
+    } else if (fresh && dbClubs.rows.length === 0) {
+      console.log("♻️ Clubs cache is fresh but empty. Firing background re-check...");
+      triggerBackgroundClubsScrape();
+      return [];
     }
     
     if (dbClubs.rows.length > 0) {
@@ -791,6 +795,10 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
     `, [normalized]);
     
     if (fresh) {
+      if (dbEvents.rows.length === 0) {
+        console.log(`♻️ Events cache is young, but empty for ${normalized}. Firing background re-check...`);
+        triggerBackgroundEventsScrape(normalized);
+      }
       return dbEvents.rows as Event[];
     }
     
