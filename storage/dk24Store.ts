@@ -687,7 +687,10 @@ async function markCacheUpdated(key: string): Promise<void> {
 // Get Clubs dynamically (reads from Neon with background/foreground scrape logic)
 export async function getClubs(): Promise<Club[]> {
   const pool = getPool();
-  if (!pool) return staticClubs;
+  if (!pool) {
+    console.warn("⚠️ No database configured. Scraping clubs live directly...");
+    try { return await scrapeClubsLive(); } catch (err) { return []; }
+  }
   
   try {
     // 1. Check cache freshness
@@ -717,8 +720,8 @@ export async function getClubs(): Promise<Club[]> {
     await markCacheUpdated("clubs");
     return liveClubs;
   } catch (error) {
-    console.error("⚠️ getClubs DB error. Falling back to static clubs list:", error);
-    return staticClubs;
+    console.error("⚠️ getClubs DB error. Scraping live:", error);
+    try { return await scrapeClubsLive(); } catch (err) { return []; }
   }
 }
 
@@ -773,8 +776,8 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
   const normalized = normalizeMonthYear(monthYear);
   const pool = getPool();
   if (!pool) {
-    // If static fallback and target matches april 2026, return staticAprilEvents, else empty
-    return normalized === "apr-2026" ? staticAprilEvents : [];
+    console.warn(`⚠️ No database configured. Scraping events live for ${normalized}...`);
+    try { return await scrapeEventsLive(normalized); } catch (err) { return []; }
   }
   
   const cacheKey = `calendar:${normalized}`;
@@ -805,8 +808,8 @@ export async function getEventsForMonth(monthYear: string): Promise<Event[]> {
     await markCacheUpdated(cacheKey);
     return liveEvents;
   } catch (error) {
-    console.error(`⚠️ getEventsForMonth DB error for ${normalized}. Falling back to static events:`, error);
-    return normalized === "apr-2026" ? staticAprilEvents : [];
+    console.error(`⚠️ getEventsForMonth DB error for ${normalized}. Scraping live:`, error);
+    try { return await scrapeEventsLive(normalized); } catch (err) { return []; }
   }
 }
 
@@ -863,185 +866,3 @@ function triggerBackgroundEventsScrape(monthYear: string): void {
       console.warn(`⚠️ Background events scrape for ${monthYear} failed:`, err.message);
     });
 }
-
-// ----------------------------------------------------
-// Static Fallbacks (Original Static Datasets)
-// ----------------------------------------------------
-
-const staticClubs: Club[] = [
-  {
-    id: "sosc",
-    name: "Sahyadri Open Source Community (SOSC)",
-    college: "Sahyadri College of Engineering & Management",
-    description: "SOSC is a vibrant community of tech enthusiasts and open-source contributors dedicated to upskilling students through peer-to-peer learning, hands-on workshops, and real-world project experience.",
-    website: "https://sosc.org.in",
-    pocs: [
-      { name: "Kushal SM", role: "Core Member", email: "mrkushalsm@gmail.com" },
-      { name: "Soniya", role: "Core Member", email: "soniyakolvekar7@gmail.com" }
-    ],
-    representatives: [
-      { name: "Manas S", role: "Community Lead", email: "salianmanas@gmail.com" }
-    ]
-  },
-  {
-    id: "devnation",
-    name: "DevNation",
-    college: "AJ Institute of Engineering and Technology",
-    description: "A community of developers working on innovative projects and organizing technical events to enhance coding skills and promote collaboration.",
-    pocs: [
-      { name: "Aboobakkar Twaha", role: "Club President", email: "aboobakkar@ajiet.edu.in" },
-      { name: "Muaz Ismail Mohammed", role: "Core Member", email: "6muazx@gmail.com" }
-    ],
-    representatives: [
-      { name: "Aboobakkar Twaha", role: "Club President", email: "aboobakkar@ajiet.edu.in" }
-    ]
-  },
-  {
-    id: "finiteloop",
-    name: "FiniteLoop",
-    college: "NMAMIT NITTE",
-    description: "Finite Loop Club (FLC) is the premier coding club at NMAMIT, dedicated to realising and inspiring ideas. FLC provides opportunities to work with the latest trending tech stacks, access workshops, secure internships, engage in peer-to-peer learning, attend guest lectures by renowned experts, and collaborate on real-time projects. Our coding contests enhance analytical and problem-solving skills.",
-    website: "https://www.finiteloop.club",
-    pocs: [
-      { name: "Sujnan D Devadiga", role: "Core member", email: "nnm23cb063@nmamit.in" },
-      { name: "Chinmay P Kulkarni", role: "Core member", email: "nnm24cs315@nmamit.in" }
-    ],
-    representatives: [
-      { name: "Nandan R Pai", role: "President", email: "nnm22am033@nmamit.in" }
-    ]
-  },
-  {
-    id: "sceptix",
-    name: "The Sceptix Club",
-    college: "St Joseph Engineering College",
-    description: "The Sceptix Club is a free and open-source technology community established in 2022 at St. Joseph Engineering College (SJEC). Built on the philosophy of \"Liberate the Mind,\" the club empowers students to think beyond conventional boundaries and transform ideas into impactful technological solutions.",
-    website: "https://www.sceptix.in",
-    pocs: [
-      { name: "Dion Lobo", role: "Member", email: "23h13.joshua@sjec.ac.in" },
-      { name: "Alston Dsouza", role: "Member", email: "24j04.alston@sjec.ac.in" }
-    ],
-    representatives: [
-      { name: "Nithin", role: "Lead", email: "nithinumeshanchan@gmail.com" },
-      { name: "Shovin", role: "Co-Lead", email: "23h46.shovin@sjec.ac.in" }
-    ]
-  },
-  {
-    id: "techbots",
-    name: "TechBots-SIT",
-    college: "Srinivas Institute of Technology",
-    description: "TechBots robotics club dedicated to building innovative solutions through hands-on projects in Robotics, Electronics, IoT, Communication Systems, AI & ML, and Mechanical Design.",
-    pocs: [
-      { name: "Ashwin Bhat", role: "Workshop coordinator", email: "ashwinb326@gmail.com" },
-      { name: "Disha I Sanil", role: "Member", email: "dishaisanil2@gmail.com" }
-    ],
-    representatives: [
-      { name: "Mahammad Safwan T", role: "President", email: "mahammadsafwant786@gmail.com" }
-    ]
-  },
-  {
-    id: "core",
-    name: "CoRE",
-    college: "Vivekananda College of Engineering and Technology, Puttur",
-    description: "CoRE (Center of Research Excellency) is a community of engineering students who are passionate about learning, growing, and exploring various fields of engineering.",
-    website: "https://corevcet.wixsite.com/core",
-    pocs: [
-      { name: "K Shreekrishna Upadhyaya", role: "Coordinator", email: "upadhyayashreekrishna@gmail.com" },
-      { name: "Abhinav N G", role: "Member", email: "abhinav.ng2006@gmail.com" }
-    ],
-    representatives: [
-      { name: "K Shreekrishna Upadhyaya", role: "Coordinator", email: "upadhyayashreekrishna@gmail.com" }
-    ]
-  },
-  {
-    id: "embed",
-    name: "Embed Club",
-    college: "PA College of Engineering",
-    description: "Embed Club is a student-led community focused on integrating software and hardware through real-world projects in IoT, embedded systems, and blockchain.",
-    website: "https://www.embedclub.org/",
-    pocs: [
-      { name: "Rafan Ahamad Sheik", role: "Joint Secretary", email: "rafan79200@gmail.com" },
-      { name: "Darel Oliver Tauro", role: "Member", email: "taurodarel@gmail.com" }
-    ],
-    representatives: [
-      { name: "K Mohammad Hisham", role: "President", email: "hishammohd313@gmail.com" }
-    ]
-  },
-  {
-    id: "acm",
-    name: "Association For Computing Machinery (ACM)",
-    college: "NMAM Institute of Technology, Nitte",
-    description: "The ACM Student Chapter at NMAM Institute of Technology is an official student chapter of the global Association for Computing Machinery.",
-    website: "https://nmamit.acm.org/",
-    pocs: [
-      { name: "Prakyath Suvarna", role: "Core member", email: "prakyathyadav@gmail.com" },
-      { name: "Hasnain Khan", role: "Core member", email: "hasnainkhan8704@gmail.com" }
-    ],
-    representatives: [
-      { name: "Pratheeksha", role: "President", email: "pratheeksha291@gmail.com" }
-    ]
-  },
-  {
-    id: "cosc",
-    name: "Canara Open-Source Community",
-    college: "Canara Engineering College, Benjanapadavu",
-    description: "Canara open-source community dedicated to sharing valuable resources and opportunities in tech!",
-    pocs: [
-      { name: "Priyanka Goankar", role: "Core member", email: "gaonkarpriyanka71@gmail.com" },
-      { name: "Chaithra S", role: "Core member", email: "Schaithra2006@gmail.com" }
-    ],
-    representatives: [
-      { name: "Kaushik H S", role: "President", email: "kaushik0h0s@gmail.com" },
-      { name: "Sanjana M", role: "Vice President" }
-    ]
-  }
-];
-
-const staticAprilEvents: Event[] = [
-  {
-    id: "evt-hacktofuture",
-    title: "HackToFuture 4.0",
-    host: "The Sceptix Club (SJEC)",
-    date: "April 15 - 17, 2026",
-    location: "St. Joseph Engineering College, Mangaluru",
-    stage: "Completed / Concluded",
-    registration_deadline: "March 31, 2026",
-    prize_pool: "₹4,00,000+",
-    description: "SJEC's national-level flagship hackathon. A 36-hour sprint empowering student teams to liberate their minds and construct modern tech products.",
-    tracks: ["Cloud & Serverless", "DevOps & Infrastructure", "Cybersecurity & Cryptography", "Open Innovation"],
-    month_year: "apr-2026"
-  },
-  {
-    id: "evt-hackfest",
-    title: "Hackfest 2026",
-    host: "Finite Loop Club (NMAMIT)",
-    date: "April 17 - 19, 2026",
-    location: "NMAMIT, Nitte",
-    stage: "Completed / Concluded",
-    registration_deadline: "April 5, 2026",
-    description: "NMAMIT's premier coding hackathon event promoting cutting-edge solutions for real-world problems.",
-    tracks: ["Healthcare Tech", "Sustainability & Green energy", "FinTech Solutions", "Logistics & Supply Chain", "Open Innovation"],
-    month_year: "apr-2026"
-  },
-  {
-    id: "evt-core-unleashed",
-    title: "CoRE Unleashed",
-    host: "CoRE (VCET Puttur)",
-    date: "April 24 - 26, 2026",
-    location: "VCET, Puttur",
-    stage: "Completed / Concluded",
-    registration_deadline: "April 12, 2026",
-    description: "VCET's flagship mega hackathon and engineering design showcase, challenging students to build highly optimized hardware and software solutions.",
-    month_year: "apr-2026"
-  },
-  {
-    id: "evt-openloop",
-    title: "OpenLoop",
-    host: "YenTech (Yenepoya)",
-    date: "April 25 - 26, 2026",
-    location: "Yenepoya Institute of Technology, Mangaluru",
-    stage: "Completed / Concluded",
-    registration_deadline: "April 15, 2026",
-    description: "Collaborative tech-sprint and open innovation challenge bringing developers and makers together to build and present open-source solutions.",
-    month_year: "apr-2026"
-  }
-];
