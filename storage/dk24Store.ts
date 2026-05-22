@@ -221,6 +221,40 @@ export async function isWorkerAuthorized(
   }
 }
 
+export async function getUsersWithRole(
+  role: string,
+): Promise<string[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const res = await pool.query(
+      `SELECT jid FROM dk24_managed_roles WHERE role = $1`,
+      [role],
+    );
+    return res.rows.map((row) => row.jid);
+  } catch (error) {
+    console.error("Error fetching users with role:", error);
+    return [];
+  }
+}
+
+export async function getUserRoles(
+  jid: string,
+): Promise<string[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const res = await pool.query(
+      `SELECT role FROM dk24_managed_roles WHERE jid = $1`,
+      [jid],
+    );
+    return res.rows.map((row) => row.role);
+  } catch (error) {
+    console.error("Error fetching custom roles for user:", error);
+    return [];
+  }
+}
+
 export async function addMentor(
   name: string,
   org: string,

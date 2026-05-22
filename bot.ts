@@ -1109,6 +1109,15 @@ async function startBot(): Promise<void> {
       }
 
       if (cmdName === "manage") {
+        if (botNumber !== 2) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Error: This command is only available for Bot 2 (DKB).",
+          );
+          continue;
+        }
+
         if (!isAdminAction()) {
           await sendBotReply(
             sock,
@@ -1118,20 +1127,70 @@ async function startBot(): Promise<void> {
           continue;
         }
 
-        const work = cmdArgs[0];
-        const numInput = cmdArgs[1];
+        const arg1 = cmdArgs[0];
+        const arg2 = cmdArgs[1];
 
-        if (!work || !numInput) {
+        if (!arg1 || !arg2) {
           await sendBotReply(
             sock,
             from || "",
-            "Usage: !manage <work> <+phone_number>\nExample: !manage mentor +919902849280",
+            "Usage: \n!manage <work> <+phone_number>\n!manage <work> -l\n!manage <+phone_number> -p\nExample: !manage mentor +919902849280\nExample: !manage mentor -l\nExample: !manage +919902849280 -p",
           );
           continue;
         }
 
-        const normalizedWork = work.trim().toLowerCase();
-        const numberMatch = numInput.trim().match(/^\+(\d{7,15})$/);
+        if (arg2 === "-p") {
+          const numberMatch = arg1.trim().match(/^\+(\d{7,15})$/);
+          if (!numberMatch) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Error: Phone number must start with + followed by country code and number, and contain no spaces.\nFormat: +{country_code}{number}\nExample: !manage +919902849280 -p",
+            );
+            continue;
+          }
+          const targetJid = `${numberMatch[1]}@s.whatsapp.net`;
+          try {
+            const { getUserRoles } = await import("./storage/dk24Store");
+            const roles = await getUserRoles(targetJid);
+            if (roles.length === 0) {
+                await sock.sendMessage(targetJid, { text: "You currently have no special roles assigned." });
+            } else if (roles.length === 1) {
+                await sock.sendMessage(targetJid, { text: `You have received the role of ${roles[0]}` });
+            } else {
+                const formattedRoles = roles.slice(0, -1).join(', ') + ' & ' + roles[roles.length - 1];
+                await sock.sendMessage(targetJid, { text: `You have received the role of ${roles[roles.length - 1]}! You now have ${formattedRoles}` });
+            }
+            await sendBotReply(sock, from || "", `Successfully sent ping to ${arg1}.`);
+          } catch (e) {
+            await sendBotReply(sock, from || "", `Failed to send ping to ${arg1}.`);
+          }
+          continue;
+        }
+
+        const normalizedWork = arg1.trim().toLowerCase();
+
+        if (arg2 === "-l") {
+          const { getUsersWithRole } = await import("./storage/dk24Store");
+          const users = await getUsersWithRole(normalizedWork);
+          if (users.length === 0) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No users found with role "${normalizedWork}".`,
+            );
+          } else {
+            const formattedUsers = users.map(j => `+${j.split("@")[0]}`).join('\n');
+            await sendBotReply(
+              sock,
+              from || "",
+              `Users with role "${normalizedWork}":\n${formattedUsers}`,
+            );
+          }
+          continue;
+        }
+
+        const numberMatch = arg2.trim().match(/^\+(\d{7,15})$/);
 
         if (!numberMatch) {
           await sendBotReply(
@@ -1152,7 +1211,7 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            `Successfully assigned role "${normalizedWork}" to ${numInput}.`,
+            `Successfully assigned role "${normalizedWork}" to ${arg2}.`,
           );
         } else {
           await sendBotReply(
