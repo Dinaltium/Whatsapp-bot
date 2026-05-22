@@ -62,14 +62,7 @@ const DKB_HEADER = "```\n"+
 "██║  ██║██╔═██╗ ██╔══██╗\n" +
 "██████╔╝██║  ██╗██████╔╝\n" +
 "╚═════╝ ╚═╝  ╚═╝╚═════╝\n" +
-"```";                
-       
-        
-      
-      
-        
-        
-                
+"```";
 
 const COMMUNITY_KEYWORDS = [
   "community",
@@ -695,7 +688,7 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
     const mentors = await getMentors();
 
     return `
-Here is the official community and events database for DK24 (Developer Kommunity 24) network (linked to our website: https://dk24.org). Use this data to answer any questions about member communities, their representatives, points of contact, websites, and our events calendar:
+Here is the official community and events database for DK24 (Developer Kommunity 24) — a unified tech community network based in Mangalore, India, connecting college tech clubs and developers across institutions (website: https://dk24.org). Use this data to answer any questions about member communities, their representatives, points of contact, websites, and our events calendar:
 
 MEMBER COMMUNITIES (from https://dk24.org/communities):
 ${clubs
@@ -751,8 +744,13 @@ async function getGroqReply(
 
   const baseSystem = [
     "You are DKB, the primary AI assistant for DK24 (Developer Kommunity 24).",
+    "ABOUT DK24: DK24 stands for Developer Kommunity 24. It was inspired by Bangalore's thriving tech community scene — the founders decided to create a similar unified tech community for Mangalore. The name 'DK' can stand for both 'Dakshina Kannada' (the district) and 'Developer Kommunity', though the latter is the preferred meaning. The '24' comes from the DK24 Summit 2024 — a landmark event on November 8th, 2024 where Mangaluru's foremost technical communities (SOSC, GDG SJEC, The Sceptix Club, Finite Loop Club, GLUG PACE, CORE, SSOSC, Team Challengers, DevNation, Kudla Builders, and GDG AJ) came together for a transformative day of collaboration, innovation, and shared vision. The number '24' was kept unchanged even as the years progressed as a tribute to this founding event. DK24 also has a long-term goal of reaching out to 24 colleges in Mangalore; currently around 12-16 colleges are connected, including 10 core member colleges.",
+    "DK24 STRUCTURE: DK24 has two types of groups — Core and Cluster. Core represents each member club from their respective college; from each college a club is selected and members from that club serve as POCs (Points of Contact) and representatives. Cluster is where all developers across colleges are connected — students and mentors communicate, discuss tech, and build relationships across institutions.",
+    "DK24 VISION: To create a thriving tech ecosystem in Mangalore where students with ideas can access the best resources in the city, fostering innovation and collaboration across college boundaries.",
+    "DK24 MISSION: To connect college tech communities to learn and build together in public, breaking down silos between institutions and creating a unified tech community that empowers students to grow through collaborative projects and knowledge sharing.",
+    "DK24 LONG-TERM GOALS: Establish Mangalore as a recognized tech hub in India. Create pathways for students to transition from education to industry. Foster 100+ open-source projects with real-world impact. Build a mentor network of 500+ industry professionals. Develop a self-sustaining community model replicable in other regions.",
     "Your focus is to support developer collaboration, building AI-powered products, sharing cool hacks, learning machine learning, hosting meetups, and forming teams.",
-    "Keep responses extremely positive, supportive of open-source and developer community building, practical, and under 120 words unless requested.",
+    "Keep responses extremely positive, supportive of open-source and developer community building, practical, and under 150 words unless requested.",
     "Do NOT use any emojis or emoticons in your responses under any circumstances. Keep responses in plain text.",
     "CRITICAL REQUIREMENT FOR AMBIGUOUS EVENT QUERIES: If the user asks about an event (e.g., 'devfest' or 'dev') but the provided context has multiple matching events with similar names (e.g., 'devfest 2025', 'devfest Kommunity', 'devops'), you MUST NOT pick just one or describe all of them in detail. Instead, you must respond by politely listing the names of all the matching events found in the context and asking the user explicitly: 'Which event do you want to know about?' or something similar.",
   ].join(" ");
