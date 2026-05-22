@@ -135,7 +135,7 @@ async function handleClubsCommand(): Promise<string> {
     clubs.forEach((c, idx) => {
       lines.push(`${idx + 1}. *${c.name}*`);
       lines.push(`   College: ${c.college}`);
-      if (c.website) {
+      if (c.website && c.website.toLowerCase().startsWith("http")) {
         lines.push(`   Website: ${c.website}`);
       }
       lines.push("");
@@ -181,7 +181,7 @@ async function handleClubDetailCommand(query: string): Promise<string> {
     const lines: string[] = [];
     lines.push(`Member Community Spotlight: *${match.name}*`);
     lines.push(`College: ${match.college}`);
-    if (match.website) {
+    if (match.website && match.website.toLowerCase().startsWith("http")) {
       lines.push(`Website: ${match.website}`);
     }
     lines.push("");
@@ -607,7 +607,7 @@ ${clubs
     (c) => `
 - ${c.name} (id: ${c.id})
   College: ${c.college}
-  Website: ${c.website || "None"}
+  Website: ${c.website && c.website.toLowerCase().startsWith("http") ? c.website : "None"}
   Description: ${c.description}
   Representatives: ${c.representatives.map((r) => `${r.name} (${cleanRole(r.role, r.email)})${r.email ? ` - ${r.email}` : ""}`).join(", ")}
   POCs: ${c.pocs.map((p) => `${p.name} (${cleanRole(p.role, p.email)})${p.email ? ` - ${p.email}` : ""}`).join(", ")}

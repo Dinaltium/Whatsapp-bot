@@ -462,13 +462,7 @@ export async function scrapeClubsLive(): Promise<Club[]> {
     console.log("🕷️ Launching Puppeteer to scrape communities...");
     const browser = await puppeteer.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--single-process",
-      ],
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
     try {
@@ -477,17 +471,7 @@ export async function scrapeClubsLive(): Promise<Club[]> {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1280, height: 1000 });
-      
-      // Speed up execution by blocking unneeded assets (images, stylesheets, fonts, media)
-      await page.setRequestInterception(true);
-      page.on("request", (req) => {
-        const type = req.resourceType();
-        if (["image", "stylesheet", "font", "media"].includes(type)) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+      // Request interception disabled for maximum page loading stability
 
       page.setDefaultNavigationTimeout(60000);
       
@@ -604,8 +588,18 @@ export async function scrapeClubsLive(): Promise<Club[]> {
           let website = "";
           const webH4 = h4s.find((h) => h.textContent.trim() === "Website");
           if (webH4) {
-            const a = webH4.nextElementSibling?.querySelector("a");
-            if (a) website = a.getAttribute("href") || "";
+            const sibling = webH4.nextElementSibling;
+            if (sibling) {
+              const a = (sibling.tagName && sibling.tagName.toLowerCase() === "a")
+                ? sibling
+                : sibling.querySelector("a");
+              if (a) {
+                const href = a.getAttribute("href") || "";
+                if (href.startsWith("http")) {
+                  website = href;
+                }
+              }
+            }
           }
 
           const id = name
@@ -656,13 +650,7 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
     );
     const browser = await puppeteer.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--single-process",
-      ],
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
     try {
@@ -671,17 +659,7 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1280, height: 1000 });
-
-      // Speed up execution by blocking unneeded assets (images, stylesheets, fonts, media)
-      await page.setRequestInterception(true);
-      page.on("request", (req) => {
-        const type = req.resourceType();
-        if (["image", "stylesheet", "font", "media"].includes(type)) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+      // Request interception disabled for maximum page loading stability
 
       page.setDefaultNavigationTimeout(60000);
 
