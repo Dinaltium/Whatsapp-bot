@@ -1,8 +1,8 @@
 import Groq from "groq-sdk";
-import { 
-  getClubs, 
-  getEventsForMonth, 
-  normalizeMonthYear, 
+import {
+  getClubs,
+  getEventsForMonth,
+  normalizeMonthYear,
   ensureSchema,
   Club,
   Event,
@@ -12,7 +12,7 @@ import {
   isWorkerAuthorized,
   Mentor,
   getMentorById,
-  updateMentorField
+  updateMentorField,
 } from "../storage/dk24Store";
 
 interface ConversationMessage {
@@ -57,11 +57,43 @@ interface AgentResult {
 const DKB_HEADER = "[DKB]";
 
 const COMMUNITY_KEYWORDS = [
-  "community", "kommunity", "dk24", "dkb", "daik", "meetup", "event", "collab", "collaboration",
-  "partner", "team", "project", "build", "share", "learn", "ai", "developer",
-  "ml", "coding", "chat", "help", "hello", "hi", "sosc", "sahyadri", "devnation",
-  "finiteloop", "sceptix", "techbots", "core", "embed", "acm", "canara", "cosc",
-  "hacktofuture", "hackfest", "openloop"
+  "community",
+  "kommunity",
+  "dk24",
+  "dkb",
+  "daik",
+  "meetup",
+  "event",
+  "collab",
+  "collaboration",
+  "partner",
+  "team",
+  "project",
+  "build",
+  "share",
+  "learn",
+  "ai",
+  "developer",
+  "ml",
+  "coding",
+  "chat",
+  "help",
+  "hello",
+  "hi",
+  "sosc",
+  "sahyadri",
+  "devnation",
+  "finiteloop",
+  "sceptix",
+  "techbots",
+  "core",
+  "embed",
+  "acm",
+  "canara",
+  "cosc",
+  "hacktofuture",
+  "hackfest",
+  "openloop",
 ];
 
 function formatBotReply(text: string): string {
@@ -86,7 +118,10 @@ function cleanRole(role: string, email?: string): string {
       cleaned = cleaned.slice(0, -trimmedEmail.length).trim();
     }
   }
-  return cleaned.replace(/^[-\s]+/, '').replace(/[-\s]+$/, '').trim();
+  return cleaned
+    .replace(/^[-\s]+/, "")
+    .replace(/[-\s]+$/, "")
+    .trim();
 }
 
 async function handleClubsCommand(): Promise<string> {
@@ -105,7 +140,9 @@ async function handleClubsCommand(): Promise<string> {
       lines.push("");
     });
 
-    lines.push("Tip: Type `!club <name>` (e.g. `!club sosc` or `!club sceptix`) to get detailed contact information and representatives for a specific club!");
+    lines.push(
+      "Tip: Type `!club <name>` (e.g. `!club sosc` or `!club sceptix`) to get detailed contact information and representatives for a specific club!",
+    );
 
     return lines.join("\n");
   } catch (error) {
@@ -127,12 +164,13 @@ async function handleClubDetailCommand(query: string): Promise<string> {
   try {
     const clubs = await getClubs();
     const normQuery = trimmedQuery.toLowerCase();
-    
+
     // Match by id, name, college
-    const match = clubs.find(c => 
-      c.id.toLowerCase() === normQuery ||
-      c.name.toLowerCase().includes(normQuery) ||
-      c.college.toLowerCase().includes(normQuery)
+    const match = clubs.find(
+      (c) =>
+        c.id.toLowerCase() === normQuery ||
+        c.name.toLowerCase().includes(normQuery) ||
+        c.college.toLowerCase().includes(normQuery),
     );
 
     if (!match) {
@@ -151,18 +189,22 @@ async function handleClubDetailCommand(query: string): Promise<string> {
 
     if (match.representatives && match.representatives.length > 0) {
       lines.push("Representatives:");
-      match.representatives.forEach(rep => {
+      match.representatives.forEach((rep) => {
         const cleanedRole = cleanRole(rep.role, rep.email);
-        lines.push(`• *${rep.name}* (${cleanedRole})${rep.email ? ` - ${rep.email}` : ""}`);
+        lines.push(
+          `• *${rep.name}* (${cleanedRole})${rep.email ? ` - ${rep.email}` : ""}`,
+        );
       });
       lines.push("");
     }
 
     if (match.pocs && match.pocs.length > 0) {
       lines.push("Points of Contact (POCs):");
-      match.pocs.forEach(poc => {
+      match.pocs.forEach((poc) => {
         const cleanedRole = cleanRole(poc.role, poc.email);
-        lines.push(`• *${poc.name}* (${cleanedRole})${poc.email ? ` - ${poc.email}` : ""}`);
+        lines.push(
+          `• *${poc.name}* (${cleanedRole})${poc.email ? ` - ${poc.email}` : ""}`,
+        );
       });
     }
 
@@ -177,10 +219,14 @@ async function handleEventsCommand(monthArg: string): Promise<string> {
   try {
     const normalized = normalizeMonthYear(monthArg);
     const eventsList = await getEventsForMonth(normalized);
-    
+
     const lines: string[] = [];
-    lines.push(`Developer Kommunity Events Catalog (${normalized.toUpperCase()})`);
-    lines.push(`We track and power awesome developer events! Here is the ${normalized} calendar:\n`);
+    lines.push(
+      `Developer Kommunity Events Catalog (${normalized.toUpperCase()})`,
+    );
+    lines.push(
+      `We track and power awesome developer events! Here is the ${normalized} calendar:\n`,
+    );
 
     if (eventsList.length === 0) {
       lines.push("No events scheduled for this month on the calendar.");
@@ -195,8 +241,12 @@ async function handleEventsCommand(monthArg: string): Promise<string> {
       });
     }
 
-    lines.push(`Tip: Type \`!event <name>\` (e.g. \`!event hackfest\`) to get full details of a specific event!`);
-    lines.push(`Tip: You can view other months by typing \`!events <monthYear>\` (e.g. \`!events may-2026\` or \`!events jun26\`).`);
+    lines.push(
+      `Tip: Type \`!event <name>\` (e.g. \`!event hackfest\`) to get full details of a specific event!`,
+    );
+    lines.push(
+      `Tip: You can view other months by typing \`!events <monthYear>\` (e.g. \`!events may-2026\` or \`!events jun26\`).`,
+    );
 
     return lines.join("\n");
   } catch (error) {
@@ -231,16 +281,17 @@ async function handleEventDetailCommand(query: string): Promise<string> {
 
     // Fetch events for target month
     let eventsList = await getEventsForMonth(targetMonth);
-    
+
     // If searchName is empty (e.g. user just typed `!event apr-2026`), treat it as `!events apr-2026`
     if (!searchName) {
       return await handleEventsCommand(targetMonth);
     }
 
     let normQuery = searchName.toLowerCase();
-    let match = eventsList.find(e => 
-      e.title.toLowerCase().includes(normQuery) ||
-      (e.host && e.host.toLowerCase().includes(normQuery))
+    let match = eventsList.find(
+      (e) =>
+        e.title.toLowerCase().includes(normQuery) ||
+        (e.host && e.host.toLowerCase().includes(normQuery)),
     );
 
     // If not found in targetMonth, let's search current month (if different)
@@ -248,19 +299,21 @@ async function handleEventDetailCommand(query: string): Promise<string> {
       const currentMonth = normalizeMonthYear("");
       if (targetMonth !== currentMonth) {
         eventsList = await getEventsForMonth(currentMonth);
-        match = eventsList.find(e => 
-          e.title.toLowerCase().includes(normQuery) ||
-          (e.host && e.host.toLowerCase().includes(normQuery))
+        match = eventsList.find(
+          (e) =>
+            e.title.toLowerCase().includes(normQuery) ||
+            (e.host && e.host.toLowerCase().includes(normQuery)),
         );
       }
     }
-    
+
     // Fallback search to "apr-2026"
     if (!match && targetMonth !== "apr-2026") {
       eventsList = await getEventsForMonth("apr-2026");
-      match = eventsList.find(e => 
-        e.title.toLowerCase().includes(normQuery) ||
-        (e.host && e.host.toLowerCase().includes(normQuery))
+      match = eventsList.find(
+        (e) =>
+          e.title.toLowerCase().includes(normQuery) ||
+          (e.host && e.host.toLowerCase().includes(normQuery)),
       );
     }
 
@@ -280,16 +333,16 @@ async function handleEventDetailCommand(query: string): Promise<string> {
     if (match.prize_pool) {
       lines.push(`Prize Pool: ${match.prize_pool}`);
     }
-    
+
     if (match.description) {
       lines.push("");
       lines.push(`About the Event:\n${match.description}`);
     }
-    
+
     if (match.tracks && match.tracks.length > 0) {
       lines.push("");
       lines.push("Event Tracks:");
-      match.tracks.forEach(track => {
+      match.tracks.forEach((track) => {
         lines.push(`• ${track}`);
       });
     }
@@ -317,20 +370,21 @@ async function handleEventDetailCommand(query: string): Promise<string> {
 async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
   try {
     const clubs = await getClubs();
-    
+
     // Always include current month
     const currentMonthYear = normalizeMonthYear("");
     const monthsToFetch = new Set<string>();
     monthsToFetch.add(currentMonthYear);
-    
+
     // Extract explicitly requested months from user prompt
-    const regex = /(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[\s-]*(\d{2,4})/gi;
+    const regex =
+      /(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[\s-]*(\d{2,4})/gi;
     let m;
-    while((m = regex.exec(userPrompt))) {
+    while ((m = regex.exec(userPrompt))) {
       monthsToFetch.add(normalizeMonthYear(m[0]));
     }
 
-    const allEvents: { month: string, events: Event[] }[] = [];
+    const allEvents: { month: string; events: Event[] }[] = [];
     for (const m of monthsToFetch) {
       const evts = await getEventsForMonth(m);
       if (evts.length > 0) {
@@ -340,13 +394,16 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
         allEvents.push({ month: m, events: [] });
       }
     }
-    
-    const eventsStr = allEvents.map(({ month, events }) => {
-      let str = `CALENDAR EVENTS FOR ${month.toUpperCase()} (from https://dk24.org/calendar?date=${month}):\n`;
-      if (events.length === 0) {
-        str += `  (No events found for ${month})\n`;
-      } else {
-        str += events.map(e => `
+
+    const eventsStr = allEvents
+      .map(({ month, events }) => {
+        let str = `CALENDAR EVENTS FOR ${month.toUpperCase()} (from https://dk24.org/calendar?date=${month}):\n`;
+        if (events.length === 0) {
+          str += `  (No events found for ${month})\n`;
+        } else {
+          str += events
+            .map(
+              (e) => `
   - ${e.title} (id: ${e.id})
     Host: ${e.host || "N/A"}
     Date: ${e.date || "N/A"}
@@ -356,35 +413,50 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
     Prize Pool: ${e.prize_pool || "N/A"}
     Description: ${e.description || "N/A"}
     Tracks: ${e.tracks ? e.tracks.join(", ") : "N/A"}
-  `).join("\n");
-      }
-      return str;
-    }).join("\n");
+  `,
+            )
+            .join("\n");
+        }
+        return str;
+      })
+      .join("\n");
 
     const mentors = await getMentors();
-    
+
     return `
 Here is the official community and events database for DK24 (Developer Kommunity 24) network (linked to our website: https://dk24.org). Use this data to answer any questions about member communities, their representatives, points of contact, websites, and our events calendar:
 
 MEMBER COMMUNITIES (from https://dk24.org/communities):
-${clubs.map(c => `
+${clubs
+  .map(
+    (c) => `
 - ${c.name} (id: ${c.id})
   College: ${c.college}
   Website: ${c.website || "None"}
   Description: ${c.description}
-  Representatives: ${c.representatives.map(r => `${r.name} (${cleanRole(r.role, r.email)})${r.email ? ` - ${r.email}` : ""}`).join(", ")}
-  POCs: ${c.pocs.map(p => `${p.name} (${cleanRole(p.role, p.email)})${p.email ? ` - ${p.email}` : ""}`).join(", ")}
-`).join("\n")}
+  Representatives: ${c.representatives.map((r) => `${r.name} (${cleanRole(r.role, r.email)})${r.email ? ` - ${r.email}` : ""}`).join(", ")}
+  POCs: ${c.pocs.map((p) => `${p.name} (${cleanRole(p.role, p.email)})${p.email ? ` - ${p.email}` : ""}`).join(", ")}
+`,
+  )
+  .join("\n")}
 
 ${eventsStr}
 
 MENTORS DIRECTORY:
-${mentors.length > 0 ? mentors.map(m => `
+${
+  mentors.length > 0
+    ? mentors
+        .map(
+          (m) => `
 - ${m.name} (ID: ${m.id})
   Expertise: ${m.expertise}
   Organization: ${m.organization || "None"}
   LinkedIn: ${m.linkedin || "None"}
-`).join("\n") : "No mentors listed yet."}
+`,
+        )
+        .join("\n")
+    : "No mentors listed yet."
+}
 `;
   } catch (error) {
     console.error("⚠️ Failed to build dynamic context prompt:", error);
@@ -474,12 +546,18 @@ async function getGroqReply(
 }
 
 function popUserMessage(session: UserSession, userPrompt: string): void {
-  if (session.messages.length > 0 && session.messages[session.messages.length - 1].content === userPrompt) {
+  if (
+    session.messages.length > 0 &&
+    session.messages[session.messages.length - 1].content === userPrompt
+  ) {
     session.messages.pop();
   }
 }
 
-function combineCountryCodeAndNumber(countryCode: string, rawNumber: string): string {
+function combineCountryCodeAndNumber(
+  countryCode: string,
+  rawNumber: string,
+): string {
   const ccDigits = countryCode.replace(/\D/g, "");
   const numDigits = rawNumber.replace(/\D/g, "");
   return `+${ccDigits} ${numDigits}`;
@@ -494,7 +572,7 @@ function parseMentorFlags(text: string): Record<string, string> {
     tokens.push({
       flag: match[1].toLowerCase(),
       index: match.index,
-      length: match[0].length
+      length: match[0].length,
     });
   }
   for (let i = 0; i < tokens.length; i++) {
@@ -503,7 +581,7 @@ function parseMentorFlags(text: string): Record<string, string> {
     const valStart = current.index + current.length;
     const valEnd = next ? next.index : text.length;
     const value = text.substring(valStart, valEnd).trim();
-    
+
     if (current.flag === "-e") {
       if (value.includes("@")) {
         flags["-email"] = value;
@@ -517,25 +595,56 @@ function parseMentorFlags(text: string): Record<string, string> {
   return flags;
 }
 
-function formatWithCountryCode(rawPhone: string): { formatted?: string; needsCountryCode: boolean; rawNumber?: string } {
+function formatWithCountryCode(rawPhone: string): {
+  formatted?: string;
+  needsCountryCode: boolean;
+  rawNumber?: string;
+} {
   const cleaned = rawPhone.trim();
   if (!cleaned) return { needsCountryCode: false };
   const startsWithPlus = cleaned.startsWith("+");
   const digits = cleaned.replace(/\D/g, "");
   if (startsWithPlus) {
     if (digits.startsWith("1")) {
-      return { formatted: `+1 ${digits.substring(1)}`, needsCountryCode: false };
+      return {
+        formatted: `+1 ${digits.substring(1)}`,
+        needsCountryCode: false,
+      };
     }
     if (digits.startsWith("7")) {
-      return { formatted: `+7 ${digits.substring(1)}`, needsCountryCode: false };
+      return {
+        formatted: `+7 ${digits.substring(1)}`,
+        needsCountryCode: false,
+      };
     }
-    const threeDigitCountryCodes = ["971", "966", "965", "968", "973", "974", "353", "370", "371", "372", "380", "506", "507", "509"];
+    const threeDigitCountryCodes = [
+      "971",
+      "966",
+      "965",
+      "968",
+      "973",
+      "974",
+      "353",
+      "370",
+      "371",
+      "372",
+      "380",
+      "506",
+      "507",
+      "509",
+    ];
     const prefix3 = digits.substring(0, 3);
     if (threeDigitCountryCodes.includes(prefix3)) {
-      return { formatted: `+${prefix3} ${digits.substring(3)}`, needsCountryCode: false };
+      return {
+        formatted: `+${prefix3} ${digits.substring(3)}`,
+        needsCountryCode: false,
+      };
     }
     const prefix2 = digits.substring(0, 2);
-    return { formatted: `+${prefix2} ${digits.substring(2)}`, needsCountryCode: false };
+    return {
+      formatted: `+${prefix2} ${digits.substring(2)}`,
+      needsCountryCode: false,
+    };
   }
   if (digits.length <= 10) {
     return { needsCountryCode: true, rawNumber: digits };
@@ -544,7 +653,10 @@ function formatWithCountryCode(rawPhone: string): { formatted?: string; needsCou
     return { formatted: `+91 ${digits.substring(2)}`, needsCountryCode: false };
   }
   if (digits.startsWith("971") && digits.length === 12) {
-    return { formatted: `+971 ${digits.substring(3)}`, needsCountryCode: false };
+    return {
+      formatted: `+971 ${digits.substring(3)}`,
+      needsCountryCode: false,
+    };
   }
   return { needsCountryCode: true, rawNumber: digits };
 }
@@ -614,7 +726,7 @@ function parseMentorCommandArgs(argsStr: string): MentorQueryArgs {
 async function handleMentorsQuery(
   session: UserSession,
   filter: string | undefined,
-  page: number
+  page: number,
 ): Promise<string> {
   const mentors = await getMentors(filter);
   if (mentors.length === 0) {
@@ -655,13 +767,15 @@ async function handleMentorsQuery(
   });
 
   if (page < totalPages) {
-    lines.push(`Tip: Type \`!next\` or \`!page ${page + 1}\` to view the next page!`);
+    lines.push(
+      `Tip: Type \`!next\` or \`!page ${page + 1}\` to view the next page!`,
+    );
   }
 
   session.lastQuery = {
     type: "mentors",
     filter,
-    page
+    page,
   };
 
   return lines.join("\n").trim();
@@ -690,33 +804,50 @@ async function handleMessage(
     if (!ccInput || ccInput.length < 1 || ccInput.length > 4) {
       return {
         reply: formatBotReply(
-          `Invalid country code "${trimmed}". Please enter only the numeric country code (e.g. 91, 971, 1):`
+          `Invalid country code "${trimmed}". Please enter only the numeric country code (e.g. 91, 971, 1):`,
         ),
         usedAI: false,
       };
     }
-    const formattedPhone = combineCountryCodeAndNumber(ccInput, pending.phoneNoCountryCode);
+    const formattedPhone = combineCountryCodeAndNumber(
+      ccInput,
+      pending.phoneNoCountryCode,
+    );
     delete session.pendingMentor;
-    const isAuthorized = isAdmin || (senderJid && await isWorkerAuthorized(senderJid, "mentor"));
+    const isAuthorized =
+      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
     if (!isAuthorized) {
       return {
-        reply: formatBotReply("Unauthorized: you do not have permission to manage mentors."),
+        reply: formatBotReply(
+          "Unauthorized: you do not have permission to manage mentors.",
+        ),
         usedAI: false,
       };
     }
     const ok = await addMentor(
-      pending.name, pending.organization, pending.expertise, pending.description,
-      pending.linkedin, pending.instagram, pending.github, pending.email,
-      formattedPhone, senderJid
+      pending.name,
+      pending.organization,
+      pending.expertise,
+      pending.description,
+      pending.linkedin,
+      pending.instagram,
+      pending.github,
+      pending.email,
+      formattedPhone,
+      senderJid,
     );
     if (ok) {
       return {
-        reply: formatBotReply(`Phone formatted as "${formattedPhone}". Mentor "${pending.name}" successfully added to the directory.`),
+        reply: formatBotReply(
+          `Phone formatted as "${formattedPhone}". Mentor "${pending.name}" successfully added to the directory.`,
+        ),
         usedAI: false,
       };
     } else {
       return {
-        reply: formatBotReply("Failed to add mentor. Please ensure database connection is healthy."),
+        reply: formatBotReply(
+          "Failed to add mentor. Please ensure database connection is healthy.",
+        ),
         usedAI: false,
       };
     }
@@ -732,29 +863,43 @@ async function handleMessage(
     if (!ccInput || ccInput.length < 1 || ccInput.length > 4) {
       return {
         reply: formatBotReply(
-          `Invalid country code "${trimmed}". Please enter only the numeric country code (e.g. 91, 971, 1):`
+          `Invalid country code "${trimmed}". Please enter only the numeric country code (e.g. 91, 971, 1):`,
         ),
         usedAI: false,
       };
     }
-    const formattedPhone = combineCountryCodeAndNumber(ccInput, pending.phoneNoCountryCode);
+    const formattedPhone = combineCountryCodeAndNumber(
+      ccInput,
+      pending.phoneNoCountryCode,
+    );
     delete session.pendingEdit;
-    const isAuthorized = isAdmin || (senderJid && await isWorkerAuthorized(senderJid, "mentor"));
+    const isAuthorized =
+      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
     if (!isAuthorized) {
       return {
-        reply: formatBotReply("Unauthorized: you do not have permission to manage mentors."),
+        reply: formatBotReply(
+          "Unauthorized: you do not have permission to manage mentors.",
+        ),
         usedAI: false,
       };
     }
-    const ok = await updateMentorField(pending.mentorId, pending.flag, formattedPhone);
+    const ok = await updateMentorField(
+      pending.mentorId,
+      pending.flag,
+      formattedPhone,
+    );
     if (ok) {
       return {
-        reply: formatBotReply(`Phone formatted as "${formattedPhone}" and updated for mentor ID ${pending.mentorId}.`),
+        reply: formatBotReply(
+          `Phone formatted as "${formattedPhone}" and updated for mentor ID ${pending.mentorId}.`,
+        ),
         usedAI: false,
       };
     } else {
       return {
-        reply: formatBotReply(`Failed to update phone for mentor ID ${pending.mentorId}.`),
+        reply: formatBotReply(
+          `Failed to update phone for mentor ID ${pending.mentorId}.`,
+        ),
         usedAI: false,
       };
     }
@@ -771,7 +916,10 @@ async function handleMessage(
   if (lowerPrompt.startsWith("club")) {
     const query = trimmed.slice(4).trim();
     popUserMessage(session, userPrompt);
-    return { reply: formatBotReply(await handleClubDetailCommand(query)), usedAI: false };
+    return {
+      reply: formatBotReply(await handleClubDetailCommand(query)),
+      usedAI: false,
+    };
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -780,13 +928,19 @@ async function handleMessage(
   if (lowerPrompt.startsWith("events")) {
     const query = trimmed.slice(6).trim();
     popUserMessage(session, userPrompt);
-    return { reply: formatBotReply(await handleEventsCommand(query)), usedAI: false };
+    return {
+      reply: formatBotReply(await handleEventsCommand(query)),
+      usedAI: false,
+    };
   }
 
   if (lowerPrompt.startsWith("event")) {
     const query = trimmed.slice(5).trim();
     popUserMessage(session, userPrompt);
-    return { reply: formatBotReply(await handleEventDetailCommand(query)), usedAI: false };
+    return {
+      reply: formatBotReply(await handleEventDetailCommand(query)),
+      usedAI: false,
+    };
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -805,31 +959,53 @@ async function handleMessage(
       const mentorId = parseInt(idMatch[1], 10);
       const mentor = await getMentorById(mentorId);
       if (!mentor) {
-        return { reply: formatBotReply(`No mentor found with ID ${mentorId}.`), usedAI: false };
+        return {
+          reply: formatBotReply(`No mentor found with ID ${mentorId}.`),
+          usedAI: false,
+        };
       }
-      return { reply: formatBotReply(formatMentorDetail(mentor)), usedAI: false };
+      return {
+        reply: formatBotReply(formatMentorDetail(mentor)),
+        usedAI: false,
+      };
     }
 
     const { filter, page } = parseMentorCommandArgs(argsStr);
-    return { reply: formatBotReply(await handleMentorsQuery(session, filter, page)), usedAI: false };
+    return {
+      reply: formatBotReply(await handleMentorsQuery(session, filter, page)),
+      usedAI: false,
+    };
   }
 
   if (lowerPrompt === "next") {
     popUserMessage(session, userPrompt);
     if (!session.lastQuery || session.lastQuery.type !== "mentors") {
       return {
-        reply: formatBotReply("No active mentor directory query to paginate. Type !mentors to view the directory first."),
+        reply: formatBotReply(
+          "No active mentor directory query to paginate. Type !mentors to view the directory first.",
+        ),
         usedAI: false,
       };
     }
-    return { reply: formatBotReply(await handleMentorsQuery(session, session.lastQuery.filter, session.lastQuery.page + 1)), usedAI: false };
+    return {
+      reply: formatBotReply(
+        await handleMentorsQuery(
+          session,
+          session.lastQuery.filter,
+          session.lastQuery.page + 1,
+        ),
+      ),
+      usedAI: false,
+    };
   }
 
   if (lowerPrompt.startsWith("page")) {
     popUserMessage(session, userPrompt);
     if (!session.lastQuery || session.lastQuery.type !== "mentors") {
       return {
-        reply: formatBotReply("No active mentor directory query to paginate. Type !mentors to view the directory first."),
+        reply: formatBotReply(
+          "No active mentor directory query to paginate. Type !mentors to view the directory first.",
+        ),
         usedAI: false,
       };
     }
@@ -837,7 +1013,12 @@ async function handleMessage(
     if (isNaN(pageNum) || pageNum <= 0) {
       return { reply: formatBotReply("Usage: !page <number>"), usedAI: false };
     }
-    return { reply: formatBotReply(await handleMentorsQuery(session, session.lastQuery.filter, pageNum)), usedAI: false };
+    return {
+      reply: formatBotReply(
+        await handleMentorsQuery(session, session.lastQuery.filter, pageNum),
+      ),
+      usedAI: false,
+    };
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -847,37 +1028,45 @@ async function handleMessage(
   // ──────────────────────────────────────────────────────────────────────────
   if (lowerPrompt.startsWith("addmentor")) {
     popUserMessage(session, userPrompt);
-    const isAuthorized = isAdmin || (senderJid && await isWorkerAuthorized(senderJid, "mentor"));
+    const isAuthorized =
+      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
     if (!isAuthorized) {
-      return { reply: formatBotReply("Unauthorized: you do not have permission to manage mentors."), usedAI: false };
+      return {
+        reply: formatBotReply(
+          "Unauthorized: you do not have permission to manage mentors.",
+        ),
+        usedAI: false,
+      };
     }
 
     const argsRaw = trimmed.slice(9); // strip "addmentor"
     if (!argsRaw.trim()) {
       return {
-        reply: formatBotReply([
-          "Usage: !addmentor <flags>",
-          "",
-          "Required flags:",
-          "  -n  Name",
-          "  -o  Organization",
-          "",
-          "Optional flags:",
-          "  -d  Description",
-          "  -ex Expertise",
-          "  -l  LinkedIn URL",
-          "  -i  Instagram handle/URL",
-          "  -g  GitHub handle/URL",
-          "  -e  Email (value must contain @)",
-          "  -p  Phone number",
-          "",
-          "Flags can be on separate lines. Example:",
-          "  !addmentor",
-          "  -n Rafan Ahamad Sheik",
-          "  -o PA College",
-          "  -ex AI/ML, Full Stack",
-          "  -p +91 9902849280",
-        ].join("\n")),
+        reply: formatBotReply(
+          [
+            "Usage: !addmentor <flags>",
+            "",
+            "Required flags:",
+            "  -n  Name",
+            "  -o  Organization",
+            "",
+            "Optional flags:",
+            "  -d  Description",
+            "  -ex Expertise",
+            "  -l  LinkedIn URL",
+            "  -i  Instagram handle/URL",
+            "  -g  GitHub handle/URL",
+            "  -e  Email (value must contain @)",
+            "  -p  Phone number",
+            "",
+            "Flags can be on separate lines. Example:",
+            "  !addmentor",
+            "  -n Rafan Ahamad Sheik",
+            "  -o PA College",
+            "  -ex AI/ML, Full Stack",
+            "  -p +91 9902849280",
+          ].join("\n"),
+        ),
         usedAI: false,
       };
     }
@@ -886,7 +1075,9 @@ async function handleMessage(
     const name = (flags["-n"] || "").trim();
     const organization = (flags["-o"] || "").trim();
     const description = (flags["-d"] || "").trim() || undefined;
-    const expertise = (flags["-ex"] || flags["-expertise"] || flags["-s"] || "").trim() || undefined;
+    const expertise =
+      (flags["-ex"] || flags["-expertise"] || flags["-s"] || "").trim() ||
+      undefined;
     const linkedin = (flags["-l"] || "").trim() || undefined;
     const instagram = (flags["-i"] || "").trim() || undefined;
     const github = (flags["-g"] || "").trim() || undefined;
@@ -894,37 +1085,83 @@ async function handleMessage(
     const rawPhone = (flags["-p"] || "").trim();
 
     if (!name) {
-      return { reply: formatBotReply("Error: Name (-n) is required.\nExample: !addmentor -n Rafan Ahamad Sheik -o PA College"), usedAI: false };
+      return {
+        reply: formatBotReply(
+          "Error: Name (-n) is required.\nExample: !addmentor -n Rafan Ahamad Sheik -o PA College",
+        ),
+        usedAI: false,
+      };
     }
     if (!organization) {
-      return { reply: formatBotReply("Error: Organization (-o) is required.\nExample: !addmentor -n Rafan Ahamad Sheik -o PA College"), usedAI: false };
+      return {
+        reply: formatBotReply(
+          "Error: Organization (-o) is required.\nExample: !addmentor -n Rafan Ahamad Sheik -o PA College",
+        ),
+        usedAI: false,
+      };
     }
 
     if (rawPhone) {
       const phoneResult = formatWithCountryCode(rawPhone);
       if (phoneResult.needsCountryCode && phoneResult.rawNumber) {
         session.pendingMentor = {
-          name, organization, description, expertise,
-          linkedin, instagram, github, email,
+          name,
+          organization,
+          description,
+          expertise,
+          linkedin,
+          instagram,
+          github,
+          email,
           phoneNoCountryCode: phoneResult.rawNumber,
         };
         return {
           reply: formatBotReply(
-            `Phone number "${rawPhone}" is missing a country code.\nPlease enter the country code for this number (e.g., 91, 971, 1):`
+            `Phone number "${rawPhone}" is missing a country code.\nPlease enter the country code for this number (e.g., 91, 971, 1):`,
           ),
           usedAI: false,
         };
       }
-      const ok = await addMentor(name, organization, expertise, description, linkedin, instagram, github, email, phoneResult.formatted, senderJid);
+      const ok = await addMentor(
+        name,
+        organization,
+        expertise,
+        description,
+        linkedin,
+        instagram,
+        github,
+        email,
+        phoneResult.formatted,
+        senderJid,
+      );
       return {
-        reply: formatBotReply(ok ? `Mentor "${name}" successfully added to the directory.` : "Failed to add mentor. Please ensure database connection is healthy."),
+        reply: formatBotReply(
+          ok
+            ? `Mentor "${name}" successfully added to the directory.`
+            : "Failed to add mentor. Please ensure database connection is healthy.",
+        ),
         usedAI: false,
       };
     }
 
-    const ok = await addMentor(name, organization, expertise, description, linkedin, instagram, github, email, undefined, senderJid);
+    const ok = await addMentor(
+      name,
+      organization,
+      expertise,
+      description,
+      linkedin,
+      instagram,
+      github,
+      email,
+      undefined,
+      senderJid,
+    );
     return {
-      reply: formatBotReply(ok ? `Mentor "${name}" successfully added to the directory.` : "Failed to add mentor. Please ensure database connection is healthy."),
+      reply: formatBotReply(
+        ok
+          ? `Mentor "${name}" successfully added to the directory.`
+          : "Failed to add mentor. Please ensure database connection is healthy.",
+      ),
       usedAI: false,
     };
   }
@@ -935,27 +1172,35 @@ async function handleMessage(
   // ──────────────────────────────────────────────────────────────────────────
   if (lowerPrompt.startsWith("editmentor")) {
     popUserMessage(session, userPrompt);
-    const isAuthorized = isAdmin || (senderJid && await isWorkerAuthorized(senderJid, "mentor"));
+    const isAuthorized =
+      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
     if (!isAuthorized) {
-      return { reply: formatBotReply("Unauthorized: you do not have permission to manage mentors."), usedAI: false };
+      return {
+        reply: formatBotReply(
+          "Unauthorized: you do not have permission to manage mentors.",
+        ),
+        usedAI: false,
+      };
     }
 
     const argsRaw = trimmed.slice(10).trim();
     const editMatch = argsRaw.match(/^(\d+)\s+(-[a-zA-Z]+)\s+([\s\S]+)$/);
     if (!editMatch) {
       return {
-        reply: formatBotReply([
-          "Usage: !editmentor <id> -<flag> <value>",
-          "",
-          "Examples:",
-          "  !editmentor 3 -n New Name",
-          "  !editmentor 3 -o New Organization",
-          "  !editmentor 3 -p +91 9902849280",
-          "  !editmentor 3 -l https://linkedin.com/in/rafan",
-          "",
-          "Flags: -n (name), -d (description), -o (org), -ex (expertise),",
-          "       -l (linkedin), -i (instagram), -g (github), -e (email), -p (phone)",
-        ].join("\n")),
+        reply: formatBotReply(
+          [
+            "Usage: !editmentor <id> -<flag> <value>",
+            "",
+            "Examples:",
+            "  !editmentor 3 -n New Name",
+            "  !editmentor 3 -o New Organization",
+            "  !editmentor 3 -p +91 9902849280",
+            "  !editmentor 3 -l https://linkedin.com/in/rafan",
+            "",
+            "Flags: -n (name), -d (description), -o (org), -ex (expertise),",
+            "       -l (linkedin), -i (instagram), -g (github), -e (email), -p (phone)",
+          ].join("\n"),
+        ),
         usedAI: false,
       };
     }
@@ -967,7 +1212,9 @@ async function handleMessage(
     const existingMentor = await getMentorById(mentorId);
     if (!existingMentor) {
       return {
-        reply: formatBotReply(`No mentor found with ID ${mentorId}. Use !mentors to view the directory.`),
+        reply: formatBotReply(
+          `No mentor found with ID ${mentorId}. Use !mentors to view the directory.`,
+        ),
         usedAI: false,
       };
     }
@@ -975,28 +1222,40 @@ async function handleMessage(
     if (flag === "-p") {
       const phoneResult = formatWithCountryCode(value);
       if (phoneResult.needsCountryCode && phoneResult.rawNumber) {
-        session.pendingEdit = { mentorId, flag, phoneNoCountryCode: phoneResult.rawNumber };
+        session.pendingEdit = {
+          mentorId,
+          flag,
+          phoneNoCountryCode: phoneResult.rawNumber,
+        };
         return {
           reply: formatBotReply(
-            `Phone number "${value}" is missing a country code.\nPlease enter the country code for this number (e.g., 91, 971, 1):`
+            `Phone number "${value}" is missing a country code.\nPlease enter the country code for this number (e.g., 91, 971, 1):`,
           ),
           usedAI: false,
         };
       }
-      const ok = await updateMentorField(mentorId, flag, phoneResult.formatted || null);
+      const ok = await updateMentorField(
+        mentorId,
+        flag,
+        phoneResult.formatted || null,
+      );
       return {
-        reply: formatBotReply(ok
-          ? `Phone updated to "${phoneResult.formatted}" for mentor "${existingMentor.name}" (ID: ${mentorId}).`
-          : `Failed to update phone for mentor ID ${mentorId}.`),
+        reply: formatBotReply(
+          ok
+            ? `Phone updated to "${phoneResult.formatted}" for mentor "${existingMentor.name}" (ID: ${mentorId}).`
+            : `Failed to update phone for mentor ID ${mentorId}.`,
+        ),
         usedAI: false,
       };
     }
 
     const ok = await updateMentorField(mentorId, flag, value || null);
     return {
-      reply: formatBotReply(ok
-        ? `Field updated successfully for mentor "${existingMentor.name}" (ID: ${mentorId}).`
-        : `Failed to update field for mentor ID ${mentorId}. Check that the flag is valid.`),
+      reply: formatBotReply(
+        ok
+          ? `Field updated successfully for mentor "${existingMentor.name}" (ID: ${mentorId}).`
+          : `Failed to update field for mentor ID ${mentorId}. Check that the flag is valid.`,
+      ),
       usedAI: false,
     };
   }
@@ -1006,21 +1265,32 @@ async function handleMessage(
   // ──────────────────────────────────────────────────────────────────────────
   if (lowerPrompt.startsWith("delmentor")) {
     popUserMessage(session, userPrompt);
-    const isAuthorized = isAdmin || (senderJid && await isWorkerAuthorized(senderJid, "mentor"));
+    const isAuthorized =
+      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
     if (!isAuthorized) {
-      return { reply: formatBotReply("Unauthorized: you do not have permission to manage mentors."), usedAI: false };
+      return {
+        reply: formatBotReply(
+          "Unauthorized: you do not have permission to manage mentors.",
+        ),
+        usedAI: false,
+      };
     }
 
     const query = trimmed.slice(9).trim();
     if (!query) {
-      return { reply: formatBotReply("Usage: !delmentor <id_or_name>"), usedAI: false };
+      return {
+        reply: formatBotReply("Usage: !delmentor <id_or_name>"),
+        usedAI: false,
+      };
     }
 
     const ok = await deleteMentor(query);
     return {
-      reply: formatBotReply(ok
-        ? `Successfully deleted mentor "${query}".`
-        : `Mentor "${query}" not found or failed to delete.`),
+      reply: formatBotReply(
+        ok
+          ? `Successfully deleted mentor "${query}".`
+          : `Mentor "${query}" not found or failed to delete.`,
+      ),
       usedAI: false,
     };
   }
@@ -1032,17 +1302,24 @@ async function handleMessage(
 
   if (!isCommunity && !session.domainUnlocked && !isAdmin) {
     return {
-      reply: formatBotReply([
-        "I support DK24 (Developer Kommunity 24)!",
-        "Ask me about AI application building, community meetups, collaboration partners, or coding challenges.",
-        "Example: !What is a good way to host a local AI developer meetup?",
-      ].join("\n")),
+      reply: formatBotReply(
+        [
+          "I support DK24 (Developer Kommunity 24)!",
+          "Ask me about AI application building, community meetups, collaboration partners, or coding challenges.",
+          "Example: !What is a good way to host a local AI developer meetup?",
+        ].join("\n"),
+      ),
       usedAI: false,
       domainLocked: true,
     };
   }
 
-  const aiReply = await getGroqReply(session.messages, groqApiKey, groqModel, userPrompt);
+  const aiReply = await getGroqReply(
+    session.messages,
+    groqApiKey,
+    groqModel,
+    userPrompt,
+  );
   return { reply: formatBotReply(aiReply), usedAI: true };
 }
 

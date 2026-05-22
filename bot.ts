@@ -70,8 +70,6 @@ const userAiRateLimitNotices = new Map<string, RateLimitNotice>();
 const userAiSessions = new Map<string, UserSession>();
 let isHealthServerStarted = false;
 
-
-
 function startHealthServer(): void {
   if (isHealthServerStarted) {
     return;
@@ -179,26 +177,34 @@ function shouldSkipMessage(
   ];
 
   if (isCommand) {
-    console.log(`[DEBUG] 📩 Potential command detected: "${text}" from JID: "${from}" (IsAdmin: ${isAdmin}, MsgId: ${msgId})`);
+    console.log(
+      `[DEBUG] 📩 Potential command detected: "${text}" from JID: "${from}" (IsAdmin: ${isAdmin}, MsgId: ${msgId})`,
+    );
   }
 
   if (adminOnlyCommands.includes(commandName)) {
     if (!isAdmin) {
-      console.log(`[DEBUG] ❌ Skipped command '${commandName}': Administrative permission required (sender is not admin).`);
+      console.log(
+        `[DEBUG] ❌ Skipped command '${commandName}': Administrative permission required (sender is not admin).`,
+      );
       return true;
     }
   }
 
   if (msg.key?.fromMe && !ALLOW_FROM_ME_MESSAGES) {
     if (isCommand) {
-      console.log(`[DEBUG] ❌ Skipped command '${commandName}': Message is from self (fromMe = true) and ALLOW_FROM_ME_MESSAGES is disabled.`);
+      console.log(
+        `[DEBUG] ❌ Skipped command '${commandName}': Message is from self (fromMe = true) and ALLOW_FROM_ME_MESSAGES is disabled.`,
+      );
     }
     return true;
   }
 
   if (!from) {
     if (isCommand) {
-      console.log(`[DEBUG] ❌ Skipped command '${commandName}': Remote JID (from) is missing.`);
+      console.log(
+        `[DEBUG] ❌ Skipped command '${commandName}': Remote JID (from) is missing.`,
+      );
     }
     return true;
   }
@@ -208,18 +214,25 @@ function shouldSkipMessage(
   }
 
   // Only verify allowlists if the command is not publicExempt and not an adminOnlyCommand
-  if (!publicExemptCommands.includes(commandName) && !adminOnlyCommands.includes(commandName)) {
+  if (
+    !publicExemptCommands.includes(commandName) &&
+    !adminOnlyCommands.includes(commandName)
+  ) {
     if (from.endsWith("@g.us")) {
       if (!groupConfig.isGroupAllowed(from)) {
         if (isCommand) {
-          console.log(`[DEBUG] ❌ Skipped command '${commandName}': Group JID "${from}" is not in groupConfig allowlist.`);
+          console.log(
+            `[DEBUG] ❌ Skipped command '${commandName}': Group JID "${from}" is not in groupConfig allowlist.`,
+          );
         }
         return true;
       }
     } else {
       if (!chatConfig.isChatAllowed(from)) {
         if (isCommand) {
-          console.log(`[DEBUG] ❌ Skipped command '${commandName}': Chat JID "${from}" is not in chatConfig allowlist.`);
+          console.log(
+            `[DEBUG] ❌ Skipped command '${commandName}': Chat JID "${from}" is not in chatConfig allowlist.`,
+          );
         }
         return true;
       }
@@ -238,7 +251,9 @@ function shouldSkipMessage(
     return true;
   }
 
-  console.log(`[DEBUG] 🎯 Command matches rules and is approved for processing: "${text}"`);
+  console.log(
+    `[DEBUG] 🎯 Command matches rules and is approved for processing: "${text}"`,
+  );
   return false;
 }
 
@@ -451,7 +466,9 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
-    console.log(`[DEBUG] 🔄 Connection state transition: connection = "${connection || 'N/A'}", qrCodePresent = ${!!qr}`);
+    console.log(
+      `[DEBUG] 🔄 Connection state transition: connection = "${connection || "N/A"}", qrCodePresent = ${!!qr}`,
+    );
 
     if (qr) {
       qrcode.generate(qr, {
@@ -481,7 +498,9 @@ async function startBot(): Promise<void> {
       } else if (statusCode === DisconnectReason.loggedOut) {
         console.log("❌ Logged out.");
       } else if (statusCode === DisconnectReason.connectionReplaced) {
-        console.log("❌ Connection replaced (440). Another instance connected! Exiting to prevent conflict...");
+        console.log(
+          "❌ Connection replaced (440). Another instance connected! Exiting to prevent conflict...",
+        );
         process.exit(0);
       } else {
         console.log("♻ Reconnecting...");
@@ -494,7 +513,9 @@ async function startBot(): Promise<void> {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    console.log(`[DEBUG] 📡 Received messages.upsert event (type: "${type}", messageCount: ${messages.length})`);
+    console.log(
+      `[DEBUG] 📡 Received messages.upsert event (type: "${type}", messageCount: ${messages.length})`,
+    );
     for (const msg of messages) {
       const from = msg.key?.remoteJid;
       const textRaw = extractMessageText(msg.message);
@@ -671,7 +692,11 @@ async function startBot(): Promise<void> {
           } else {
             const formatted = list.map((entry) => {
               const botLabel =
-                entry.botNumber === 1 ? "ECB" : entry.botNumber === 2 ? "DKB" : "PARAG";
+                entry.botNumber === 1
+                  ? "ECB"
+                  : entry.botNumber === 2
+                    ? "DKB"
+                    : "PARAG";
               return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
             });
             await sendBotReply(
@@ -749,7 +774,11 @@ async function startBot(): Promise<void> {
           } else {
             const formatted = list.map((entry) => {
               const botLabel =
-                entry.botNumber === 1 ? "ECB" : entry.botNumber === 2 ? "DKB" : "PARAG";
+                entry.botNumber === 1
+                  ? "ECB"
+                  : entry.botNumber === 2
+                    ? "DKB"
+                    : "PARAG";
               return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
             });
             await sendBotReply(
@@ -836,24 +865,48 @@ async function startBot(): Promise<void> {
             if (hasExisting) {
               const ok = groupConfig.addGroup(target, botNumber);
               if (ok) {
-                await sendBotReply(sock, from || "", `Changed ${target} to use Bot ${botNumber} (Group).`);
+                await sendBotReply(
+                  sock,
+                  from || "",
+                  `Changed ${target} to use Bot ${botNumber} (Group).`,
+                );
               } else {
-                await sendBotReply(sock, from || "", `Failed to change bot for ${target}.`);
+                await sendBotReply(
+                  sock,
+                  from || "",
+                  `Failed to change bot for ${target}.`,
+                );
               }
             } else {
-              await sendBotReply(sock, from || "", `${target} is not in the group allowlist. Use !addgroup first.`);
+              await sendBotReply(
+                sock,
+                from || "",
+                `${target} is not in the group allowlist. Use !addgroup first.`,
+              );
             }
           } else {
             const hasExisting = chatConfig.isChatAllowed(target);
             if (hasExisting) {
               const ok = chatConfig.addChat(target, botNumber);
               if (ok) {
-                await sendBotReply(sock, from || "", `Changed ${target} to use Bot ${botNumber} (Chat).`);
+                await sendBotReply(
+                  sock,
+                  from || "",
+                  `Changed ${target} to use Bot ${botNumber} (Chat).`,
+                );
               } else {
-                await sendBotReply(sock, from || "", `Failed to change bot for ${target}.`);
+                await sendBotReply(
+                  sock,
+                  from || "",
+                  `Failed to change bot for ${target}.`,
+                );
               }
             } else {
-              await sendBotReply(sock, from || "", `${target} is not in the chat allowlist. Use !addchat first.`);
+              await sendBotReply(
+                sock,
+                from || "",
+                `${target} is not in the chat allowlist. Use !addchat first.`,
+              );
             }
           }
           continue;
@@ -861,30 +914,51 @@ async function startBot(): Promise<void> {
 
         if (cmdName === "neonping") {
           try {
-            const { getDatabaseUrl } = await import("./storage/neonAuthStateStore");
+            const { getDatabaseUrl } =
+              await import("./storage/neonAuthStateStore");
             const dbUrl = getDatabaseUrl();
             if (!dbUrl) {
-              await sendBotReply(sock, from || "", "Neon is NOT configured (DATABASE_URL is missing in environment variables).");
+              await sendBotReply(
+                sock,
+                from || "",
+                "Neon is NOT configured (DATABASE_URL is missing in environment variables).",
+              );
               continue;
             }
-            
+
             const { Pool } = await import("pg");
-            const tempPool = new Pool({ connectionString: dbUrl, connectionTimeoutMillis: 5000, ssl: { rejectUnauthorized: false } });
+            const tempPool = new Pool({
+              connectionString: dbUrl,
+              connectionTimeoutMillis: 5000,
+              ssl: { rejectUnauthorized: false },
+            });
             const start = Date.now();
             await tempPool.query("SELECT 1;");
             const duration = Date.now() - start;
             await tempPool.end();
-            
-            await sendBotReply(sock, from || "", `✅ Neon database is currently reachable! Timestamp: ${duration}ms.`);
+
+            await sendBotReply(
+              sock,
+              from || "",
+              `✅ Neon database is currently reachable! Timestamp: ${duration}ms.`,
+            );
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            await sendBotReply(sock, from || "", `❌ Neon database query failed:\n${msg}`);
+            await sendBotReply(
+              sock,
+              from || "",
+              `❌ Neon database query failed:\n${msg}`,
+            );
           }
           continue;
         }
 
         if (cmdName === "neonconnect") {
-          await sendBotReply(sock, from || "", "⏳ Initiating hard reconnect. The bot will exit and allow the environment manager (e.g. Render) to restart it cleanly with Neon connection...");
+          await sendBotReply(
+            sock,
+            from || "",
+            "⏳ Initiating hard reconnect. The bot will exit and allow the environment manager (e.g. Render) to restart it cleanly with Neon connection...",
+          );
           setTimeout(() => {
             process.exit(1);
           }, 2000);
@@ -897,7 +971,7 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            "Unauthorized: admin privileges required for that command."
+            "Unauthorized: admin privileges required for that command.",
           );
           continue;
         }
@@ -909,7 +983,7 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            "Usage: !manage <work> <+phone_number>\nExample: !manage mentor +919902849280"
+            "Usage: !manage <work> <+phone_number>\nExample: !manage mentor +919902849280",
           );
           continue;
         }
@@ -921,7 +995,7 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            "Error: Phone number must start with + followed by country code and number, and contain no spaces.\nFormat: +{country_code}{number}\nExample: +919902849280"
+            "Error: Phone number must start with + followed by country code and number, and contain no spaces.\nFormat: +{country_code}{number}\nExample: +919902849280",
           );
           continue;
         }
@@ -936,13 +1010,13 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            `Successfully assigned role "${normalizedWork}" to ${numInput}.`
+            `Successfully assigned role "${normalizedWork}" to ${numInput}.`,
           );
         } else {
           await sendBotReply(
             sock,
             from || "",
-            "Failed to assign role. Ensure the database connection is healthy."
+            "Failed to assign role. Ensure the database connection is healthy.",
           );
         }
         continue;
@@ -1005,22 +1079,25 @@ async function startBot(): Promise<void> {
             "We are unable to process your request at the moment. Please try again later.",
           );
         } catch (sendError) {
-          console.error("Failed to send fallback message:", sendError instanceof Error ? sendError.message : String(sendError));
+          console.error(
+            "Failed to send fallback message:",
+            sendError instanceof Error ? sendError.message : String(sendError),
+          );
         }
       }
     }
   });
 
   // Handle graceful shutdown for hosting environments like Render
-  process.removeAllListeners('SIGTERM');
-  process.removeAllListeners('SIGINT');
+  process.removeAllListeners("SIGTERM");
+  process.removeAllListeners("SIGINT");
 
-  process.on('SIGTERM', () => {
+  process.on("SIGTERM", () => {
     console.log("🛑 Received SIGTERM, shutting down gracefully...");
     process.exit(0);
   });
 
-  process.on('SIGINT', () => {
+  process.on("SIGINT", () => {
     console.log("🛑 Received SIGINT, shutting down gracefully...");
     process.exit(0);
   });
