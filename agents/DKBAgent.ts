@@ -288,6 +288,7 @@ async function handleEventDetailCommand(query: string): Promise<string> {
     }
 
     let match: Event | undefined;
+    const otherMatchingTitles: string[] = [];
 
     // Prioritize global cached database search if no month was explicitly requested
     if (!explicitMonth) {
@@ -299,6 +300,11 @@ async function handleEventDetailCommand(query: string): Promise<string> {
         );
         if (exactMatch) {
           match = exactMatch;
+          globalMatches.forEach((e) => {
+            if (e.id !== exactMatch.id) {
+              otherMatchingTitles.push(e.title);
+            }
+          });
         } else if (globalMatches.length > 1) {
           // Multiple matches found! Present a choice list to the user
           const lines: string[] = [];
@@ -333,6 +339,11 @@ async function handleEventDetailCommand(query: string): Promise<string> {
         );
         if (exactMatch) {
           match = exactMatch;
+          localMatches.forEach((e) => {
+            if (e.id !== exactMatch.id) {
+              otherMatchingTitles.push(e.title);
+            }
+          });
         } else if (localMatches.length > 1) {
           // Multiple local matches
           const lines: string[] = [];
@@ -364,6 +375,11 @@ async function handleEventDetailCommand(query: string): Promise<string> {
             );
             if (exactMatch) {
               match = exactMatch;
+              currentMatches.forEach((e) => {
+                if (e.id !== exactMatch.id) {
+                  otherMatchingTitles.push(e.title);
+                }
+              });
             } else if (currentMatches.length > 1) {
               const lines: string[] = [];
               lines.push(`Multiple events found matching "${searchName}" in ${currentMonth}:\n`);
@@ -394,6 +410,11 @@ async function handleEventDetailCommand(query: string): Promise<string> {
           );
           if (exactMatch) {
             match = exactMatch;
+            fallbackMatches.forEach((e) => {
+              if (e.id !== exactMatch.id) {
+                otherMatchingTitles.push(e.title);
+              }
+            });
           } else if (fallbackMatches.length > 1) {
             const lines: string[] = [];
             lines.push(`Multiple events found matching "${searchName}" in April 2026:\n`);
@@ -451,6 +472,12 @@ async function handleEventDetailCommand(query: string): Promise<string> {
     if (match.youtube_link) {
       lines.push("");
       lines.push(`Recording Link: ${match.youtube_link}`);
+    }
+
+    if (otherMatchingTitles.length > 0) {
+      lines.push("");
+      lines.push(`💡 Other matching events found: ${otherMatchingTitles.map((t) => `*${t}*`).join(", ")}`);
+      lines.push("Type `!event <full-name>` to see details of a specific event!");
     }
 
     return lines.join("\n");
