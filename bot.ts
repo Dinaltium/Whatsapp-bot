@@ -278,7 +278,7 @@ function shouldSkipMessage(
 }
 
 function getSenderId(msg: proto.IWebMessageInfo): string {
-  return msg.key?.participant || msg.key?.remoteJid || "unknown";
+  return normalizeJid(msg.key?.participant || msg.key?.remoteJid || "unknown") as string;
 }
 
 function normalizeJid(
@@ -288,6 +288,10 @@ function normalizeJid(
 
   if (jid.endsWith("@lid")) {
     return jid.replace(/@lid$/, "@s.whatsapp.net");
+  }
+
+  if (jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
+    return jid.split(":")[0] + "@s.whatsapp.net";
   }
 
   return jid;
