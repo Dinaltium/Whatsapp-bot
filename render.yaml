@@ -21,4 +21,4 @@ services:
       - key: ALLOWED_CHATS_FILE
         value: allowed-chats.json
       - key: PUPPETEER_CACHE_DIR
-        value: /opt/render/project/src/.puppeteer_cache
+        value: /opt/render/project/src/node_modules/.cache/puppeteer
