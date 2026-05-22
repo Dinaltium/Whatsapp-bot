@@ -439,18 +439,41 @@ export async function scrapeClubsLive(): Promise<Club[]> {
   console.log("🕷️ Launching Puppeteer to scrape communities...");
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--single-process",
+    ],
   });
 
   try {
     const page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    );
     await page.setViewport({ width: 1280, height: 1000 });
-    await page.goto("https://dk24.org/communities", {
+    
+    console.log("🕷️ Navigating to communities...");
+    const response = await page.goto("https://dk24.org/communities", {
       waitUntil: "networkidle2",
     });
+    
+    console.log(`🕷️ Response Status: ${response?.status() || "unknown"}`);
+    console.log(`🕷️ Page Title: ${await page.title()}`);
 
-    // Give it a tiny delay to ensure page elements settle
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // Give it a dynamic delay to ensure loading skeleton clears
+    try {
+      await page.waitForFunction(
+        () => !document.querySelector(".animate-pulse"),
+        { timeout: 8000 }
+      );
+      console.log("🕷️ Skeleton loading cleared.");
+    } catch (e) {
+      console.log("🕷️ Timing out waiting for skeleton to clear, using fallback delay...");
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
 
     const clubs = await page.evaluate(() => {
       const cards: any[] = [];
@@ -571,6 +594,14 @@ export async function scrapeClubsLive(): Promise<Club[]> {
     console.log(
       `🕷️ Successfully scraped ${clubs.length} communities from website.`,
     );
+
+    if (clubs.length === 0) {
+      const htmlSnippet = (await page.content()).substring(0, 800);
+      console.warn(
+        `⚠️ Found 0 communities in scrapeClubsLive. Page status: ${response?.status() || "unknown"}, title: "${await page.title()}". Snapshot: \n${htmlSnippet}`
+      );
+    }
+
     return clubs;
   } catch (error) {
     console.error("❌ Puppeteer error scraping clubs:", error);
@@ -586,18 +617,40 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
   );
   const browser = await puppeteer.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--single-process",
+    ],
   });
 
   try {
     const page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    );
     await page.setViewport({ width: 1280, height: 1000 });
 
     const url = `https://dk24.org/calendar?date=${monthYear}`;
-    await page.goto(url, { waitUntil: "networkidle2" });
+    console.log(`🕷️ Navigating to calendar: ${url}`);
+    const response = await page.goto(url, { waitUntil: "networkidle2" });
+    
+    console.log(`🕷️ Response Status: ${response?.status() || "unknown"}`);
+    console.log(`🕷️ Page Title: ${await page.title()}`);
 
-    // Wait for React rendering / skeleton elements to load
-    await new Promise((resolve) => setTimeout(resolve, 4000));
+    // Wait for React rendering / skeleton elements to load dynamically
+    try {
+      await page.waitForFunction(
+        () => !document.querySelector(".animate-pulse"),
+        { timeout: 8000 }
+      );
+      console.log("🕷️ Skeleton loading cleared.");
+    } catch (e) {
+      console.log("🕷️ Timing out waiting for skeleton to clear, using fallback delay...");
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
 
     // Find all buttons on the page that contain an h3 (representing event cards)
     const buttons = await page.$$("button");
@@ -612,6 +665,14 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
     console.log(
       `🕷️ Found ${eventButtonsIndex.length} event card buttons to scrape.`,
     );
+
+    if (eventButtonsIndex.length === 0) {
+      const htmlSnippet = (await page.content()).substring(0, 800);
+      console.warn(
+        `⚠️ Found 0 calendar event buttons in scrapeEventsLive. Page status: ${response?.status() || "unknown"}, title: "${await page.title()}". Snapshot: \n${htmlSnippet}`
+      );
+    }
+
     const scrapedEvents: Event[] = [];
 
     for (let i = 0; i < eventButtonsIndex.length; i++) {
