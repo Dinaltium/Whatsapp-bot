@@ -173,6 +173,8 @@ function shouldSkipMessage(
     "rmchat",
     "listchats",
     "changebot",
+    "neonping",
+    "neonconnect",
     "manage",
   ];
 
@@ -416,15 +418,13 @@ async function startBot(): Promise<void> {
       console.log("✅ Using Neon PostgreSQL for auth state storage.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(
-        `⚠️ Neon auth storage unavailable (${message}). Falling back to local auth/.`,
-      );
-      authStore = await useMultiFileAuthState("auth");
-      console.log("ℹ Using local auth/ files for auth state storage.");
+      console.error(`🚨 FATAL: Neon auth storage unavailable (${message}).`);
+      console.error("Since local fallback is disabled, exiting the process.");
+      process.exit(1);
     }
   } else {
-    authStore = await useMultiFileAuthState("auth");
-    console.log("ℹ Using local auth/ files for auth state storage.");
+    console.error("🚨 FATAL: DATABASE_URL not found, cannot connect to Neon.");
+    process.exit(1);
   }
 
   const { state, saveCreds } = authStore;
@@ -647,6 +647,8 @@ async function startBot(): Promise<void> {
           "rmchat",
           "listchats",
           "changebot",
+          "neonping",
+          "neonconnect",
         ].includes(cmdName)
       ) {
         if (!isAdminAction()) {
@@ -854,6 +856,38 @@ async function startBot(): Promise<void> {
               await sendBotReply(sock, from || "", `${target} is not in the chat allowlist. Use !addchat first.`);
             }
           }
+          continue;
+        }
+
+        if (cmdName === "neonping") {
+          try {
+            const { getDatabaseUrl } = await import("./storage/neonAuthStateStore");
+            const dbUrl = getDatabaseUrl();
+            if (!dbUrl) {
+              await sendBotReply(sock, from || "", "Neon is NOT configured (DATABASE_URL is missing in environment variables).");
+              continue;
+            }
+            
+            const { Pool } = await import("pg");
+            const tempPool = new Pool({ connectionString: dbUrl, connectionTimeoutMillis: 5000, ssl: { rejectUnauthorized: false } });
+            const start = Date.now();
+            await tempPool.query("SELECT 1;");
+            const duration = Date.now() - start;
+            await tempPool.end();
+            
+            await sendBotReply(sock, from || "", `✅ Neon database is currently reachable! Timestamp: ${duration}ms.`);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            await sendBotReply(sock, from || "", `❌ Neon database query failed:\n${msg}`);
+          }
+          continue;
+        }
+
+        if (cmdName === "neonconnect") {
+          await sendBotReply(sock, from || "", "⏳ Initiating hard reconnect. The bot will exit and allow the environment manager (e.g. Render) to restart it cleanly with Neon connection...");
+          setTimeout(() => {
+            process.exit(1);
+          }, 2000);
           continue;
         }
       }
