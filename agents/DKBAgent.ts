@@ -1594,6 +1594,125 @@ async function handleMessage(
   return { reply: formatBotReply(aiReply), usedAI: true };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// INTRO CLASSIFIER
+// Called by bot.ts when a trigger ("welcome"/"introduce" + @mention) is seen.
+// Classifies the mentioned person's first message to determine if they are a
+// mentor (working professional/founder) or student. Auto-adds mentors.
+// ──────────────────────────────────────────────────────────────────────────
+async function classifyIntroduction(
+  introText: string,
+  groqApiKey: string | undefined,
+  groqModel: string,
+): Promise<{
+  isMentor: boolean;
+  name: string;
+  organization: string;
+  expertise: string;
+  description: string;
+  linkedin: string;
+  email: string;
+} | null> {
+  if (!groqApiKey || !introText.trim()) return null;
+
+  const prompt = `You are classifying a WhatsApp group introduction message sent to a developer community network in Mangalore, India called DK24.
+
+Determine if the sender is a MENTOR or a STUDENT:
+- MENTOR: working professional, founder, co-founder, software engineer at a company, alumni now in industry, someone with a professional role or running a startup
+- STUDENT: current college/university student with no professional role yet, someone primarily learning or seeking internships
+
+Introduction message:
+"""
+${introText}
+"""
+
+Respond ONLY with valid JSON (no markdown, no explanation):
+{
+  "classification": "mentor" or "student",
+  "name": "full name or empty string",
+  "organization": "company or startup name or empty string",
+  "expertise": "technologies, skills, or domain or empty string",
+  "description": "one sentence summary of who they are",
+  "linkedin": "linkedin URL if mentioned else empty string",
+  "email": "email address if mentioned else empty string"
+}`;
+
+  try {
+    const fetchFn =
+      (globalThis as any).fetch ?? (await import("node-fetch")).default;
+    const res = await fetchFn(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${groqApiKey}`,
+        },
+        body: JSON.stringify({
+          model: groqModel,
+          temperature: 0.1,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error(`Groq API ${res.status}`);
+    const data = await res.json();
+    let raw = (data?.choices?.[0]?.message?.content || "").trim();
+    // Strip markdown fences if model wraps the JSON
+    raw = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    const parsed = JSON.parse(raw);
+    return {
+      isMentor: parsed.classification === "mentor",
+      name: String(parsed.name || ""),
+      organization: String(parsed.organization || ""),
+      expertise: String(parsed.expertise || ""),
+      description: String(parsed.description || ""),
+      linkedin: String(parsed.linkedin || ""),
+      email: String(parsed.email || ""),
+    };
+  } catch (error) {
+    console.error("[IntroClassifier] Classification error:", error);
+    return null;
+  }
+}
+
+async function classifyAndAutoAddMentor(
+  introText: string,
+  senderJid: string,
+  senderPhone: string,
+  groqApiKey: string | undefined,
+  groqModel: string,
+): Promise<{ isMentor: boolean; mentorName?: string }> {
+  const result = await classifyIntroduction(introText, groqApiKey, groqModel);
+  if (!result || !result.isMentor) return { isMentor: false };
+
+  console.log(
+    `[IntroClassifier] Mentor identified: "${result.name}" at "${result.organization}"`,
+  );
+
+  const phone = senderPhone ? `+${senderPhone}` : "";
+  try {
+    await addMentor(
+      result.name || "Unknown",
+      result.organization,
+      result.expertise,
+      result.description,
+      result.linkedin,
+      "", // instagram — not typically in intros
+      "", // github   — not typically in intros
+      result.email,
+      phone,
+      senderJid,
+    );
+    return { isMentor: true, mentorName: result.name || undefined };
+  } catch (error) {
+    console.error("[IntroClassifier] Failed to save mentor to DB:", error);
+    return { isMentor: false };
+  }
+}
+
 export default {
   handleMessage,
+  classifyAndAutoAddMentor,
 };

@@ -10,6 +10,7 @@ import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
 import WhatsAppAgent from "./agents/WhatsAppAgent";
+import DKBAgent from "./agents/DKBAgent";
 import groupConfig from "./config/groupAllowlist";
 import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
@@ -68,6 +69,19 @@ interface RateLimitNotice {
 const userAiRateLimits = new Map<string, RateLimitState>();
 const userAiRateLimitNotices = new Map<string, RateLimitNotice>();
 const userAiSessions = new Map<string, UserSession>();
+
+// Tracks members being watched for their intro message after a
+// "welcome / introduce" trigger in a bot-2 group.
+// Key: normalized sender JID.  Value: { group JID, timestamp }
+const pendingIntros = new Map<string, { groupJid: string; triggeredAt: number }>();
+const INTRO_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
+setInterval(() => {
+  const now = Date.now();
+  for (const [jid, info] of pendingIntros) {
+    if (now - info.triggeredAt > INTRO_TTL_MS) pendingIntros.delete(jid);
+  }
+}, 30 * 60 * 1000);
+
 let isHealthServerStarted = false;
 
 function startHealthServer(): void {
@@ -283,6 +297,14 @@ function isAdminSender(msg: proto.IWebMessageInfo): boolean {
     .filter(Boolean);
   const senderId = normalizeJid(getSenderId(msg));
   return admins.includes(senderId as string);
+}
+
+/** Extracts @mentioned JIDs from a WhatsApp extended text message. */
+function extractMentionedJids(msg: proto.IWebMessageInfo): string[] {
+  const jids =
+    msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+  if (!jids || !Array.isArray(jids)) return [];
+  return jids.filter((j): j is string => typeof j === "string");
 }
 
 function buildRateLimitKey(from: string, senderId: string): string {
@@ -530,6 +552,116 @@ async function startBot(): Promise<void> {
       const from = msg.key?.remoteJid;
       const textRaw = extractMessageText(msg.message);
       const text = textRaw ? textRaw.trim() : null;
+
+      // ── INTRO DETECTION ──────────────────────────────────────────────────
+      // Runs on ALL non-command messages in bot-2 groups.
+      // Phase 1 – Trigger: someone says "welcome/introduce" + @mentions a JID
+      //           → add that JID to pendingIntros.
+      // Phase 2 – Capture: sender is in pendingIntros
+      //           → classify via AI, auto-add if mentor, give chatConfig access.
+      if (
+        text &&
+        from?.endsWith("@g.us") &&
+        !text.startsWith(COMMAND_PREFIX) &&
+        msg.message
+      ) {
+        const introGroupBot = groupConfig.getGroupBot(from);
+        if (introGroupBot?.botNumber === 2) {
+          const introSenderId = normalizeJid(getSenderId(msg)) || "";
+          const hasTriggerWord = /\bintroduce\b|\bwelcome\b/i.test(text);
+
+          // --- Phase 1: detect trigger and register JIDs to watch ---
+          if (hasTriggerWord) {
+            const mentionedJids = extractMentionedJids(msg);
+            for (const jid of mentionedJids) {
+              const normalized = normalizeJid(jid);
+              if (
+                normalized &&
+                !normalized.endsWith("@g.us") &&
+                normalized !== introSenderId
+              ) {
+                pendingIntros.set(normalized, {
+                  groupJid: from,
+                  triggeredAt: Date.now(),
+                });
+                console.log(
+                  `[DEBUG] Intro tracker: watching ${normalized} in ${from}`,
+                );
+              }
+            }
+            // Fallback: extract phone numbers from text when no @mention
+            if (mentionedJids.length === 0) {
+              const phoneMatches =
+                text.match(/(?:\+?\d[\d\s\-]{7,14}\d)/g) || [];
+              for (const ph of phoneMatches) {
+                const digits = ph.replace(/\D/g, "");
+                if (digits.length >= 10) {
+                  const derivedJid = `${digits}@s.whatsapp.net`;
+                  pendingIntros.set(derivedJid, {
+                    groupJid: from,
+                    triggeredAt: Date.now(),
+                  });
+                  console.log(
+                    `[DEBUG] Intro tracker: watching phone-derived ${derivedJid} in ${from}`,
+                  );
+                }
+              }
+            }
+          }
+
+          // --- Phase 2: sender is tracked — this IS their intro message ---
+          let trackedGroupJid: string | null = null;
+
+          // Exact JID match
+          if (pendingIntros.has(introSenderId)) {
+            trackedGroupJid = pendingIntros.get(introSenderId)!.groupJid;
+            pendingIntros.delete(introSenderId);
+          } else {
+            // Fuzzy: compare last 10 digits to handle country-code mismatches
+            const senderSuffix = introSenderId.replace(/\D/g, "").slice(-10);
+            for (const [trackedJid, info] of pendingIntros) {
+              const trackedSuffix = trackedJid.replace(/\D/g, "").slice(-10);
+              if (senderSuffix && senderSuffix === trackedSuffix) {
+                trackedGroupJid = info.groupJid;
+                pendingIntros.delete(trackedJid);
+                break;
+              }
+            }
+          }
+
+          if (trackedGroupJid && trackedGroupJid === from && text.length > 20) {
+            console.log(
+              `[DEBUG] Intro captured from ${introSenderId}, running classification...`,
+            );
+            try {
+              const senderPhone = introSenderId.replace(/@.*/, "");
+              const result = await DKBAgent.classifyAndAutoAddMentor(
+                text,
+                introSenderId,
+                senderPhone,
+                GROQ_API_KEY,
+                GROQ_MODEL,
+              );
+              if (result.isMentor) {
+                console.log(
+                  `[DEBUG] Intro classified as MENTOR: ${
+                    result.mentorName || introSenderId
+                  } — adding to directory and allowchats`,
+                );
+                await chatConfig.addChat(introSenderId, 2);
+              } else {
+                console.log(
+                  `[DEBUG] Intro classified as STUDENT: ${introSenderId} — ignoring`,
+                );
+              }
+            } catch (err) {
+              console.error("[DEBUG] Intro classification error:", err);
+            }
+            continue; // Intro handled — skip command processing for this message
+          }
+        }
+      }
+      // ── END INTRO DETECTION ──────────────────────────────────────────────
 
       if (shouldSkipMessage(msg, from, text)) {
         continue;
