@@ -551,7 +551,7 @@ async function startBot(): Promise<void> {
         botNumber = chatBot?.botNumber || 0;
       }
 
-      console.log("Command:", command);
+      console.log(`[DEBUG] Processing command: "${command}"`);
 
       if (command === "!ping") {
         await sendBotReply(sock, from || "", "pong");
