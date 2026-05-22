@@ -177,9 +177,9 @@ export async function ensureSchema(): Promise<void> {
         added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-    console.log("✅ dk24Store database schema verified.");
+    console.log("dk24Store database schema verified.");
   } catch (error) {
-    console.error("⚠️ Failed to bootstrap dk24Store schema:", error);
+    console.error("Failed to bootstrap dk24Store schema:", error);
   }
 }
 
@@ -459,7 +459,7 @@ async function serializePuppeteer<T>(task: () => Promise<T>): Promise<T> {
 
 export async function scrapeClubsLive(): Promise<Club[]> {
   return serializePuppeteer(async () => {
-    console.log("🕷️ Launching Puppeteer to scrape communities...");
+    console.log("Launching Puppeteer to scrape communities...");
     const browser = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -475,14 +475,14 @@ export async function scrapeClubsLive(): Promise<Club[]> {
 
       page.setDefaultNavigationTimeout(60000);
       
-      console.log("🕷️ Navigating to communities...");
+      console.log("Navigating to communities...");
       const response = await page.goto("https://dk24.org/communities", {
         waitUntil: "networkidle2",
         timeout: 60000,
       });
     
-    console.log(`🕷️ Response Status: ${response?.status() || "unknown"}`);
-    console.log(`🕷️ Page Title: ${await page.title()}`);
+    console.log(`Response Status: ${response?.status() || "unknown"}`);
+    console.log(`Page Title: ${await page.title()}`);
 
     // Give it a dynamic delay to ensure loading skeleton clears
     try {
@@ -490,9 +490,9 @@ export async function scrapeClubsLive(): Promise<Club[]> {
         () => !document.querySelector(".animate-pulse"),
         { timeout: 8000 }
       );
-      console.log("🕷️ Skeleton loading cleared.");
+      console.log("Skeleton loading cleared.");
     } catch (e) {
-      console.log("🕷️ Timing out waiting for skeleton to clear, using fallback delay...");
+      console.log("Timing out waiting for skeleton to clear, using fallback delay...");
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
 
@@ -664,11 +664,11 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
       page.setDefaultNavigationTimeout(60000);
 
       const url = `https://dk24.org/calendar?date=${monthYear}`;
-      console.log(`🕷️ Navigating to calendar: ${url}`);
+      console.log(`Navigating to calendar: ${url}`);
       const response = await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
     
-    console.log(`🕷️ Response Status: ${response?.status() || "unknown"}`);
-    console.log(`🕷️ Page Title: ${await page.title()}`);
+    console.log(`Response Status: ${response?.status() || "unknown"}`);
+    console.log(`Page Title: ${await page.title()}`);
 
     // Wait for React rendering / skeleton elements to load dynamically
     try {
@@ -676,9 +676,9 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
         () => !document.querySelector(".animate-pulse"),
         { timeout: 8000 }
       );
-      console.log("🕷️ Skeleton loading cleared.");
+      console.log("Skeleton loading cleared.");
     } catch (e) {
-      console.log("🕷️ Timing out waiting for skeleton to clear, using fallback delay...");
+      console.log("Timing out waiting for skeleton to clear, using fallback delay...");
       await new Promise((resolve) => setTimeout(resolve, 4000));
     }
 
@@ -693,13 +693,13 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
     }
 
     console.log(
-      `🕷️ Found ${eventButtonsIndex.length} event card buttons to scrape.`,
+      `Found ${eventButtonsIndex.length} event card buttons to scrape.`,
     );
 
     if (eventButtonsIndex.length === 0) {
       const htmlSnippet = (await page.content()).substring(0, 800);
       console.warn(
-        `⚠️ Found 0 calendar event buttons in scrapeEventsLive. Page status: ${response?.status() || "unknown"}, title: "${await page.title()}". Snapshot: \n${htmlSnippet}`
+        `Found 0 calendar event buttons in scrapeEventsLive. Page status: ${response?.status() || "unknown"}, title: "${await page.title()}". Snapshot: \n${htmlSnippet}`
       );
     }
 
@@ -710,7 +710,7 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
       const idx = eventButtonsIndex[i];
       if (freshButtons[idx]) {
         console.log(
-          `🕷️ Scraping event detail modal ${i + 1}/${eventButtonsIndex.length}...`,
+          `Scraping event detail modal ${i + 1}/${eventButtonsIndex.length}...`,
         );
         await freshButtons[idx].click();
 
@@ -853,12 +853,12 @@ export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
     }
 
     console.log(
-      `🕷️ Successfully scraped ${scrapedEvents.length} events for ${monthYear}.`,
+      `Successfully scraped ${scrapedEvents.length} events for ${monthYear}.`,
     );
     return scrapedEvents;
   } catch (error) {
     console.error(
-      `❌ Puppeteer error scraping calendar events for ${monthYear}:`,
+      `Puppeteer error scraping calendar events for ${monthYear}:`,
       error,
     );
     throw error;
@@ -874,7 +874,7 @@ const inFlightEventsScrapes = new Map<string, Promise<Event[]>>();
 
 export async function getClubsLiveLocked(): Promise<Club[]> {
   if (inFlightClubsScrape.promise) {
-    console.log("🔒 Clubs scrape already in flight. Reusing existing promise...");
+    console.log("Clubs scrape already in flight. Reusing existing promise...");
     return inFlightClubsScrape.promise;
   }
   inFlightClubsScrape.promise = scrapeClubsLive().finally(() => {
@@ -886,7 +886,7 @@ export async function getClubsLiveLocked(): Promise<Club[]> {
 export async function getEventsLiveLocked(monthYear: string): Promise<Event[]> {
   let promise = inFlightEventsScrapes.get(monthYear);
   if (promise) {
-    console.log(`🔒 Events scrape for ${monthYear} already in flight. Reusing existing promise...`);
+    console.log(`Events scrape for ${monthYear} already in flight. Reusing existing promise...`);
     return promise;
   }
   promise = scrapeEventsLive(monthYear).finally(() => {
@@ -978,24 +978,24 @@ export async function getClubs(allowScrape: boolean = true): Promise<Club[]> {
     if (dbClubs.rows.length > 0) {
       // Background scrape since we have cached stale records (serves instantly, updates quietly)
       console.log(
-        "♻️ Clubs cache is stale. serving DB cached records and running background crawling...",
+        "Clubs cache is stale. serving DB cached records and running background crawling...",
       );
       triggerBackgroundClubsScrape();
       return dbClubs.rows as Club[];
     }
 
     // Foreground scrape since database is completely empty
-    console.log("🔍 Clubs database is empty. Running foreground scraping...");
+    console.log("Clubs database is empty. Running foreground scraping...");
     const liveClubs = await getClubsLiveLocked();
     if (liveClubs && liveClubs.length > 0) {
       await saveClubsToDb(liveClubs);
       await markCacheUpdated("clubs");
     } else {
-      console.warn("⚠️ Foreground clubs scrape returned empty array, skipping cache update to allow retry.");
+      console.warn("Foreground clubs scrape returned empty array, skipping cache update to allow retry.");
     }
     return liveClubs;
   } catch (error) {
-    console.error("⚠️ getClubs DB error. Scraping live:", error);
+    console.error("getClubs DB error. Scraping live:", error);
     if (!allowScrape) {
       return [];
     }
@@ -1039,7 +1039,7 @@ async function saveClubsToDb(clubs: Club[]): Promise<void> {
     await pool.query("COMMIT");
   } catch (error) {
     await pool.query("ROLLBACK");
-    console.error("❌ Failed to save clubs to database:", error);
+    console.error("Failed to save clubs to database:", error);
   }
 }
 
@@ -1050,13 +1050,13 @@ function triggerBackgroundClubsScrape(): void {
       if (live && live.length > 0) {
         await saveClubsToDb(live);
         await markCacheUpdated("clubs");
-        console.log("♻️ Background clubs scrape completed successfully.");
+        console.log("Background clubs scrape completed successfully.");
       } else {
-        console.warn("⚠️ Background clubs scrape returned empty array, skipping cache update.");
+        console.warn("Background clubs scrape returned empty array, skipping cache update.");
       }
     })
     .catch((err) => {
-      console.warn("⚠️ Background clubs scrape failed:", err.message);
+      console.warn("Background clubs scrape failed:", err.message);
     });
 }
 
@@ -1106,7 +1106,7 @@ export async function getEventsForMonth(
     if (dbEvents.rows.length > 0) {
       // Stale cache hit: Return immediately, run scrape in background
       console.log(
-        `♻️ Events cache is stale for ${normalized}. serving DB records and running background crawling...`,
+        `Events cache is stale for ${normalized}. serving DB records and running background crawling...`,
       );
       triggerBackgroundEventsScrape(normalized);
       return dbEvents.rows as Event[];
@@ -1114,19 +1114,19 @@ export async function getEventsForMonth(
 
     // No records exist and cache is NOT fresh: Run in foreground so the user receives a correct list
     console.log(
-      `🔍 Events database empty/missing cache for ${normalized}. Running foreground calendar scraping...`,
+      `Events database empty/missing cache for ${normalized}. Running foreground calendar scraping...`,
     );
     const liveEvents = await getEventsLiveLocked(normalized);
     if (liveEvents && liveEvents.length > 0) {
       await saveEventsToDb(liveEvents, normalized);
       await markCacheUpdated(cacheKey);
     } else {
-      console.warn(`⚠️ Foreground events scrape for ${normalized} returned empty array, skipping cache update to allow retry.`);
+      console.warn(`Foreground events scrape for ${normalized} returned empty array, skipping cache update to allow retry.`);
     }
     return liveEvents;
   } catch (error) {
     console.error(
-      `⚠️ getEventsForMonth DB error for ${normalized}. Scraping live:`,
+      `getEventsForMonth DB error for ${normalized}. Scraping live:`,
       error,
     );
     if (!allowScrape) {
@@ -1200,17 +1200,17 @@ function triggerBackgroundEventsScrape(monthYear: string): void {
         await saveEventsToDb(live, monthYear);
         await markCacheUpdated(cacheKey);
         console.log(
-          `♻️ Background events scrape for ${monthYear} completed successfully.`,
+          `Background events scrape for ${monthYear} completed successfully.`,
         );
       } else {
         console.warn(
-          `⚠️ Background events scrape for ${monthYear} returned empty array, skipping cache update.`
+          `Background events scrape for ${monthYear} returned empty array, skipping cache update.`
         );
       }
     })
     .catch((err) => {
       console.warn(
-        `⚠️ Background events scrape for ${monthYear} failed:`,
+        `Background events scrape for ${monthYear} failed:`,
         err.message,
       );
     });

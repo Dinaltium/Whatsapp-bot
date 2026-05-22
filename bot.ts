@@ -90,13 +90,13 @@ function startHealthServer(): void {
   });
 
   server.listen(port, () => {
-    console.log(`🌐 Health server listening on port ${port}`);
+    console.log(`Health server listening on port ${port}`);
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err && err.code === "EADDRINUSE") {
       console.warn(
-        `⚠️ Health server port ${port} already in use. Continuing without health endpoint.`,
+        `Health server port ${port} already in use. Continuing without health endpoint.`,
       );
       return;
     }
@@ -106,7 +106,7 @@ function startHealthServer(): void {
 }
 
 function printBanner(): void {
-  console.log("\n🤖 WhatsApp Bot Coordinator Online.");
+  console.log("\nWhatsApp Bot Coordinator Online.");
 }
 
 async function sendBotReply(
@@ -178,14 +178,14 @@ function shouldSkipMessage(
 
   if (isCommand) {
     console.log(
-      `[DEBUG] 📩 Potential command detected: "${text}" from JID: "${from}" (IsAdmin: ${isAdmin}, MsgId: ${msgId})`,
+      `[DEBUG] Potential command detected: "${text}" from JID: "${from}" (IsAdmin: ${isAdmin}, MsgId: ${msgId})`,
     );
   }
 
   if (adminOnlyCommands.includes(commandName)) {
     if (!isAdmin) {
       console.log(
-        `[DEBUG] ❌ Skipped command '${commandName}': Administrative permission required (sender is not admin).`,
+        `[DEBUG] Skipped command '${commandName}': Administrative permission required (sender is not admin).`,
       );
       return true;
     }
@@ -194,7 +194,7 @@ function shouldSkipMessage(
   if (msg.key?.fromMe && !ALLOW_FROM_ME_MESSAGES) {
     if (isCommand) {
       console.log(
-        `[DEBUG] ❌ Skipped command '${commandName}': Message is from self (fromMe = true) and ALLOW_FROM_ME_MESSAGES is disabled.`,
+        `[DEBUG] Skipped command '${commandName}': Message is from self (fromMe = true) and ALLOW_FROM_ME_MESSAGES is disabled.`,
       );
     }
     return true;
@@ -203,7 +203,7 @@ function shouldSkipMessage(
   if (!from) {
     if (isCommand) {
       console.log(
-        `[DEBUG] ❌ Skipped command '${commandName}': Remote JID (from) is missing.`,
+        `[DEBUG] Skipped command '${commandName}': Remote JID (from) is missing.`,
       );
     }
     return true;
@@ -222,7 +222,7 @@ function shouldSkipMessage(
       if (!groupConfig.isGroupAllowed(from)) {
         if (isCommand) {
           console.log(
-            `[DEBUG] ❌ Skipped command '${commandName}': Group JID "${from}" is not in groupConfig allowlist.`,
+            `[DEBUG] Skipped command '${commandName}': Group JID "${from}" is not in groupConfig allowlist.`,
           );
         }
         return true;
@@ -231,7 +231,7 @@ function shouldSkipMessage(
       if (!chatConfig.isChatAllowed(from)) {
         if (isCommand) {
           console.log(
-            `[DEBUG] ❌ Skipped command '${commandName}': Chat JID "${from}" is not in chatConfig allowlist.`,
+            `[DEBUG] Skipped command '${commandName}': Chat JID "${from}" is not in chatConfig allowlist.`,
           );
         }
         return true;
@@ -252,7 +252,7 @@ function shouldSkipMessage(
   }
 
   console.log(
-    `[DEBUG] 🎯 Command matches rules and is approved for processing: "${text}"`,
+    `[DEBUG] Command matches rules and is approved for processing: "${text}"`,
   );
   return false;
 }
@@ -430,27 +430,27 @@ async function startBot(): Promise<void> {
   if (databaseUrl) {
     try {
       authStore = await useNeonAuthState("parag");
-      console.log("✅ Using Neon PostgreSQL for auth state storage.");
+      console.log("Using Neon PostgreSQL for auth state storage.");
 
       // Bootstrap PostgreSQL schemas
       const { ensureSchema } = await import("./storage/dk24Store");
       await ensureSchema();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`🚨 FATAL: Neon auth storage unavailable (${message}).`);
+      console.error(`FATAL: Neon auth storage unavailable (${message}).`);
       console.error("Since local fallback is disabled, exiting the process.");
       process.exit(1);
     }
   } else {
-    console.error("🚨 FATAL: DATABASE_URL not found, cannot connect to Neon.");
+    console.error("FATAL: DATABASE_URL not found, cannot connect to Neon.");
     process.exit(1);
   }
 
   // Load allowlists from Database (with env/file fallback) on startup
-  console.log("⏳ Initializing group and chat allowlists...");
+  console.log("Initializing group and chat allowlists...");
   await groupConfig.init();
   await chatConfig.init();
-  console.log("✅ Allowlists initialized.");
+  console.log("Allowlists initialized.");
 
   const { state, saveCreds } = authStore;
 
@@ -470,14 +470,14 @@ async function startBot(): Promise<void> {
       await saveCreds();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`⚠️ Failed to persist auth credentials: ${message}`);
+      console.warn(`Failed to persist auth credentials: ${message}`);
     }
   });
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
     console.log(
-      `[DEBUG] 🔄 Connection state transition: connection = "${connection || "N/A"}", qrCodePresent = ${!!qr}`,
+      `[DEBUG] Connection state transition: connection = "${connection || "N/A"}", qrCodePresent = ${!!qr}`,
     );
 
     if (qr) {
@@ -485,35 +485,35 @@ async function startBot(): Promise<void> {
         small: true,
       });
 
-      console.log("📱 Scan QR");
+      console.log("Scan QR");
     }
 
     if (connection === "open") {
-      console.log("✅ PARAG connected.");
+      console.log("PARAG connected.");
     }
 
     if (connection === "close") {
       const err = lastDisconnect?.error as any;
       const statusCode = err?.output?.statusCode || err?.statusCode;
 
-      console.log("❌ Connection closed");
+      console.log("Connection closed");
       console.log("Reason:", statusCode);
 
       if (statusCode === 515) {
-        console.log("♻ Restart required. Reconnecting...");
+        console.log("Restart required. Reconnecting...");
 
         setTimeout(() => {
           startBot();
         }, 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
-        console.log("❌ Logged out.");
+        console.log("Logged out.");
       } else if (statusCode === DisconnectReason.connectionReplaced) {
         console.log(
-          "❌ Connection replaced (440). Another instance connected! Exiting to prevent conflict...",
+          "Connection replaced (440). Another instance connected! Exiting to prevent conflict...",
         );
         process.exit(0);
       } else {
-        console.log("♻ Reconnecting...");
+        console.log("Reconnecting...");
 
         setTimeout(() => {
           startBot();
@@ -524,7 +524,7 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     console.log(
-      `[DEBUG] 📡 Received messages.upsert event (type: "${type}", messageCount: ${messages.length})`,
+      `[DEBUG] Received messages.upsert event (type: "${type}", messageCount: ${messages.length})`,
     );
     for (const msg of messages) {
       const from = msg.key?.remoteJid;
@@ -551,7 +551,7 @@ async function startBot(): Promise<void> {
         botNumber = chatBot?.botNumber || 0;
       }
 
-      console.log("📩", command);
+      console.log("Command:", command);
 
       if (command === "!ping") {
         await sendBotReply(sock, from || "", "pong");
@@ -1103,12 +1103,12 @@ async function startBot(): Promise<void> {
   process.removeAllListeners("SIGINT");
 
   process.on("SIGTERM", () => {
-    console.log("🛑 Received SIGTERM, shutting down gracefully...");
+    console.log("Received SIGTERM, shutting down gracefully...");
     process.exit(0);
   });
 
   process.on("SIGINT", () => {
-    console.log("🛑 Received SIGINT, shutting down gracefully...");
+    console.log("Received SIGINT, shutting down gracefully...");
     process.exit(0);
   });
 }
