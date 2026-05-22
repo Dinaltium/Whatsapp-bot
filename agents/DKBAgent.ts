@@ -314,11 +314,53 @@ async function handleEventDetailCommand(query: string): Promise<string> {
   }
 }
 
-async function buildDynamicContextPrompt(): Promise<string> {
+async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
   try {
     const clubs = await getClubs();
+    
+    // Always include current month
     const currentMonthYear = normalizeMonthYear("");
-    const events = await getEventsForMonth(currentMonthYear);
+    const monthsToFetch = new Set<string>();
+    monthsToFetch.add(currentMonthYear);
+    
+    // Extract explicitly requested months from user prompt
+    const regex = /(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[\s-]*(\d{2,4})/gi;
+    let m;
+    while((m = regex.exec(userPrompt))) {
+      monthsToFetch.add(normalizeMonthYear(m[0]));
+    }
+
+    const allEvents: { month: string, events: Event[] }[] = [];
+    for (const m of monthsToFetch) {
+      const evts = await getEventsForMonth(m);
+      if (evts.length > 0) {
+        allEvents.push({ month: m, events: evts });
+      } else {
+        // Just push empty to show there are 0 events
+        allEvents.push({ month: m, events: [] });
+      }
+    }
+    
+    const eventsStr = allEvents.map(({ month, events }) => {
+      let str = `CALENDAR EVENTS FOR ${month.toUpperCase()} (from https://dk24.org/calendar?date=${month}):\n`;
+      if (events.length === 0) {
+        str += `  (No events found for ${month})\n`;
+      } else {
+        str += events.map(e => `
+  - ${e.title} (id: ${e.id})
+    Host: ${e.host || "N/A"}
+    Date: ${e.date || "N/A"}
+    Location: ${e.location || "N/A"}
+    Current Stage: ${e.stage || "Upcoming"}
+    Registration Deadline: ${e.registration_deadline || "N/A"}
+    Prize Pool: ${e.prize_pool || "N/A"}
+    Description: ${e.description || "N/A"}
+    Tracks: ${e.tracks ? e.tracks.join(", ") : "N/A"}
+  `).join("\n");
+      }
+      return str;
+    }).join("\n");
+
     const mentors = await getMentors();
     
     return `
@@ -334,18 +376,7 @@ ${clubs.map(c => `
   POCs: ${c.pocs.map(p => `${p.name} (${cleanRole(p.role, p.email)})${p.email ? ` - ${p.email}` : ""}`).join(", ")}
 `).join("\n")}
 
-CALENDAR EVENTS FOR ${currentMonthYear.toUpperCase()} (from https://dk24.org/calendar?date=${currentMonthYear}):
-${events.map(e => `
-- ${e.title} (id: ${e.id})
-  Host: ${e.host || "N/A"}
-  Date: ${e.date || "N/A"}
-  Location: ${e.location || "N/A"}
-  Current Stage: ${e.stage || "Upcoming"}
-  Registration Deadline: ${e.registration_deadline || "N/A"}
-  Prize Pool: ${e.prize_pool || "N/A"}
-  Description: ${e.description || "N/A"}
-  Tracks: ${e.tracks ? e.tracks.join(", ") : "N/A"}
-`).join("\n")}
+${eventsStr}
 
 MENTORS DIRECTORY:
 ${mentors.length > 0 ? mentors.map(m => `
@@ -365,6 +396,7 @@ async function getGroqReply(
   conversationMessages: ConversationMessage[],
   groqApiKey: string | undefined,
   groqModel: string,
+  userPrompt: string,
 ): Promise<string> {
   if (!groqApiKey) {
     return "Groq key missing. Set GROQ_API_KEY in your environment to enable AI replies.";
@@ -381,7 +413,7 @@ async function getGroqReply(
     "Do NOT use any emojis or emoticons in your responses under any circumstances. Keep responses in plain text.",
   ].join(" ");
 
-  const dynamicContext = await buildDynamicContextPrompt();
+  const dynamicContext = await buildDynamicContextPrompt(userPrompt);
   const systemPrompt = `${baseSystem}\n\n${dynamicContext}`;
 
   const messages: GroqMessageParam[] = conversationMessages.map((msg) => ({
@@ -1010,7 +1042,7 @@ async function handleMessage(
     };
   }
 
-  const aiReply = await getGroqReply(session.messages, groqApiKey, groqModel);
+  const aiReply = await getGroqReply(session.messages, groqApiKey, groqModel, userPrompt);
   return { reply: formatBotReply(aiReply), usedAI: true };
 }
 
