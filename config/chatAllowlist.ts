@@ -90,7 +90,7 @@ function getChatBot(
 
   ensureLoaded();
 
-  if (allowedChats!.length === 0) return { botNumber: 0 };
+  if (allowedChats!.length === 0) return null;
 
   const normalizedInput = normalizeChatJid(jid);
   const inputVariants = new Set(

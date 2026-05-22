@@ -72,7 +72,7 @@ function getGroupBot(
 
   ensureLoaded();
 
-  if (allowedGroups!.length === 0) return { botNumber: 0 };
+  if (allowedGroups!.length === 0) return null;
 
   const entry = allowedGroups!.find((g) => g.jid === jid);
   return entry ? { botNumber: entry.botNumber } : null;

@@ -172,6 +172,7 @@ function shouldSkipMessage(
     "addchat",
     "rmchat",
     "listchats",
+    "changebot",
     "manage",
   ];
 
@@ -479,6 +480,9 @@ async function startBot(): Promise<void> {
         }, 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
         console.log("❌ Logged out.");
+      } else if (statusCode === DisconnectReason.connectionReplaced) {
+        console.log("❌ Connection replaced (440). Another instance connected! Exiting to prevent conflict...");
+        process.exit(0);
       } else {
         console.log("♻ Reconnecting...");
 
@@ -642,6 +646,7 @@ async function startBot(): Promise<void> {
           "addchat",
           "rmchat",
           "listchats",
+          "changebot",
         ].includes(cmdName)
       ) {
         if (!isAdminAction()) {
@@ -808,6 +813,49 @@ async function startBot(): Promise<void> {
             continue;
           }
         }
+
+        if (cmdName === "changebot") {
+          let target = cmdArgs[0];
+          const botNumber = cmdArgs[1] ? parseInt(cmdArgs[1], 10) : NaN;
+
+          if (!target || isNaN(botNumber)) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Usage: !changebot <jid> <bot-number>\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB`,
+            );
+            continue;
+          }
+
+          target = normalizeJid(target) as string;
+
+          if (target.endsWith("@g.us")) {
+            const hasExisting = groupConfig.isGroupAllowed(target);
+            if (hasExisting) {
+              const ok = groupConfig.addGroup(target, botNumber);
+              if (ok) {
+                await sendBotReply(sock, from || "", `Changed ${target} to use Bot ${botNumber} (Group).`);
+              } else {
+                await sendBotReply(sock, from || "", `Failed to change bot for ${target}.`);
+              }
+            } else {
+              await sendBotReply(sock, from || "", `${target} is not in the group allowlist. Use !addgroup first.`);
+            }
+          } else {
+            const hasExisting = chatConfig.isChatAllowed(target);
+            if (hasExisting) {
+              const ok = chatConfig.addChat(target, botNumber);
+              if (ok) {
+                await sendBotReply(sock, from || "", `Changed ${target} to use Bot ${botNumber} (Chat).`);
+              } else {
+                await sendBotReply(sock, from || "", `Failed to change bot for ${target}.`);
+              }
+            } else {
+              await sendBotReply(sock, from || "", `${target} is not in the chat allowlist. Use !addchat first.`);
+            }
+          }
+          continue;
+        }
       }
 
       if (cmdName === "manage") {
@@ -914,15 +962,33 @@ async function startBot(): Promise<void> {
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-        console.error("Groq error:", errorMessage);
+        console.error("Agent/Baileys error:", errorMessage);
 
-        await sendBotReply(
-          sock,
-          from || "",
-          "AI is temporarily unavailable. Please try again in a moment.",
-        );
+        try {
+          await sendBotReply(
+            sock,
+            from || "",
+            "We are unable to process your request at the moment. Please try again later.",
+          );
+        } catch (sendError) {
+          console.error("Failed to send fallback message:", sendError instanceof Error ? sendError.message : String(sendError));
+        }
       }
     }
+  });
+
+  // Handle graceful shutdown for hosting environments like Render
+  process.removeAllListeners('SIGTERM');
+  process.removeAllListeners('SIGINT');
+
+  process.on('SIGTERM', () => {
+    console.log("🛑 Received SIGTERM, shutting down gracefully...");
+    process.exit(0);
+  });
+
+  process.on('SIGINT', () => {
+    console.log("🛑 Received SIGINT, shutting down gracefully...");
+    process.exit(0);
   });
 }
 
