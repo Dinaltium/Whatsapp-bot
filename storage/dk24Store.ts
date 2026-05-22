@@ -968,10 +968,10 @@ export async function getClubs(allowScrape: boolean = true): Promise<Club[]> {
       return dbClubs.rows as Club[];
     }
 
-    // 2. Check cache freshness
+    // 2. Check cache freshness (only reuse cache if valid AND we actually have records)
     const fresh = await isCacheValid("clubs");
 
-    if (fresh) {
+    if (fresh && dbClubs.rows.length > 0) {
       return dbClubs.rows as Club[];
     }
 
@@ -987,8 +987,12 @@ export async function getClubs(allowScrape: boolean = true): Promise<Club[]> {
     // Foreground scrape since database is completely empty
     console.log("🔍 Clubs database is empty. Running foreground scraping...");
     const liveClubs = await getClubsLiveLocked();
-    await saveClubsToDb(liveClubs);
-    await markCacheUpdated("clubs");
+    if (liveClubs && liveClubs.length > 0) {
+      await saveClubsToDb(liveClubs);
+      await markCacheUpdated("clubs");
+    } else {
+      console.warn("⚠️ Foreground clubs scrape returned empty array, skipping cache update to allow retry.");
+    }
     return liveClubs;
   } catch (error) {
     console.error("⚠️ getClubs DB error. Scraping live:", error);
@@ -1043,9 +1047,13 @@ function triggerBackgroundClubsScrape(): void {
   // Run asynchronously without blocking current process thread
   getClubsLiveLocked()
     .then(async (live) => {
-      await saveClubsToDb(live);
-      await markCacheUpdated("clubs");
-      console.log("♻️ Background clubs scrape completed successfully.");
+      if (live && live.length > 0) {
+        await saveClubsToDb(live);
+        await markCacheUpdated("clubs");
+        console.log("♻️ Background clubs scrape completed successfully.");
+      } else {
+        console.warn("⚠️ Background clubs scrape returned empty array, skipping cache update.");
+      }
     })
     .catch((err) => {
       console.warn("⚠️ Background clubs scrape failed:", err.message);
@@ -1088,9 +1096,10 @@ export async function getEventsForMonth(
       return dbEvents.rows as Event[];
     }
 
+    // Check cache freshness (only reuse cache if valid AND we actually have records for this month)
     const fresh = await isCacheValid(cacheKey);
 
-    if (fresh) {
+    if (fresh && dbEvents.rows.length > 0) {
       return dbEvents.rows as Event[];
     }
 
@@ -1108,8 +1117,12 @@ export async function getEventsForMonth(
       `🔍 Events database empty/missing cache for ${normalized}. Running foreground calendar scraping...`,
     );
     const liveEvents = await getEventsLiveLocked(normalized);
-    await saveEventsToDb(liveEvents, normalized);
-    await markCacheUpdated(cacheKey);
+    if (liveEvents && liveEvents.length > 0) {
+      await saveEventsToDb(liveEvents, normalized);
+      await markCacheUpdated(cacheKey);
+    } else {
+      console.warn(`⚠️ Foreground events scrape for ${normalized} returned empty array, skipping cache update to allow retry.`);
+    }
     return liveEvents;
   } catch (error) {
     console.error(
@@ -1183,11 +1196,17 @@ function triggerBackgroundEventsScrape(monthYear: string): void {
   const cacheKey = `calendar:${monthYear}`;
   getEventsLiveLocked(monthYear)
     .then(async (live) => {
-      await saveEventsToDb(live, monthYear);
-      await markCacheUpdated(cacheKey);
-      console.log(
-        `♻️ Background events scrape for ${monthYear} completed successfully.`,
-      );
+      if (live && live.length > 0) {
+        await saveEventsToDb(live, monthYear);
+        await markCacheUpdated(cacheKey);
+        console.log(
+          `♻️ Background events scrape for ${monthYear} completed successfully.`,
+        );
+      } else {
+        console.warn(
+          `⚠️ Background events scrape for ${monthYear} returned empty array, skipping cache update.`
+        );
+      }
     })
     .catch((err) => {
       console.warn(
