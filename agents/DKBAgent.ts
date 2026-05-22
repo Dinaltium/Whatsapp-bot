@@ -411,7 +411,44 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
       }
     }
 
-    const eventsStr = allEvents
+    const seenEventIds = new Set<string>();
+    for (const item of allEvents) {
+      for (const e of item.events) {
+        seenEventIds.add(e.id);
+      }
+    }
+
+    // Extract search keywords from user prompt (filter out stop words)
+    const stopWords = new Set([
+      "what", "is", "about", "event", "events", "the", "there", "in", "on", "at", 
+      "for", "of", "and", "to", "a", "an", "this", "that", "these", "those", 
+      "which", "who", "how", "why", "where", "when", "details", "detail", 
+      "info", "information", "can", "you", "me", "show", "list", "get", "any", 
+      "find", "search", "with", "from", "are", "here", "there", "is", "was", "were",
+      "be", "been", "being", "have", "has", "had", "do", "does", "did", "but", 
+      "by", "or", "as", "if", "then", "else", "so", "than", "too", "very", "s", "t"
+    ]);
+
+    const words = userPrompt
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+    const globalMatches: Event[] = [];
+    const uniqueWords = Array.from(new Set(words));
+    for (const word of uniqueWords) {
+      const matches = await searchEventsGlobally(word);
+      for (const match of matches) {
+        if (!seenEventIds.has(match.id)) {
+          seenEventIds.add(match.id);
+          globalMatches.push(match);
+        }
+      }
+    }
+
+    let eventsStr = allEvents
       .map(({ month, events }) => {
         let str = `CALENDAR EVENTS FOR ${month.toUpperCase()} (from https://dk24.org/calendar?date=${month}):\n`;
         if (events.length === 0) {
@@ -436,6 +473,24 @@ async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
         return str;
       })
       .join("\n");
+
+    if (globalMatches.length > 0) {
+      eventsStr += `\n\nRELEVANT MATCHING EVENTS FOUND FOR USER QUERY:\n` + globalMatches
+        .map(
+          (e) => `
+  - ${e.title} (id: ${e.id})
+    Host: ${e.host || "N/A"}
+    Date: ${e.date || "N/A"}
+    Location: ${e.location || "N/A"}
+    Current Stage: ${e.stage || "Upcoming"}
+    Registration Deadline: ${e.registration_deadline || "N/A"}
+    Prize Pool: ${e.prize_pool || "N/A"}
+    Description: ${e.description || "N/A"}
+    Tracks: ${e.tracks ? e.tracks.join(", ") : "N/A"}
+  `,
+        )
+        .join("\n");
+    }
 
     const mentors = await getMentors();
 
