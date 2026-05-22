@@ -73,14 +73,20 @@ const userAiSessions = new Map<string, UserSession>();
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
 // Key: normalized sender JID.  Value: { group JID, timestamp }
-const pendingIntros = new Map<string, { groupJid: string; triggeredAt: number }>();
+const pendingIntros = new Map<
+  string,
+  { groupJid: string; triggeredAt: number }
+>();
 const INTRO_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
-setInterval(() => {
-  const now = Date.now();
-  for (const [jid, info] of pendingIntros) {
-    if (now - info.triggeredAt > INTRO_TTL_MS) pendingIntros.delete(jid);
-  }
-}, 30 * 60 * 1000);
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [jid, info] of pendingIntros) {
+      if (now - info.triggeredAt > INTRO_TTL_MS) pendingIntros.delete(jid);
+    }
+  },
+  30 * 60 * 1000,
+);
 
 let isHealthServerStarted = false;
 
@@ -301,8 +307,7 @@ function isAdminSender(msg: proto.IWebMessageInfo): boolean {
 
 /** Extracts @mentioned JIDs from a WhatsApp extended text message. */
 function extractMentionedJids(msg: proto.IWebMessageInfo): string[] {
-  const jids =
-    msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+  const jids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
   if (!jids || !Array.isArray(jids)) return [];
   return jids.filter((j): j is string => typeof j === "string");
 }
@@ -1154,16 +1159,31 @@ async function startBot(): Promise<void> {
             const { getUserRoles } = await import("./storage/dk24Store");
             const roles = await getUserRoles(targetJid);
             if (roles.length === 0) {
-                await sock.sendMessage(targetJid, { text: "You currently have no special roles assigned." });
+              await sock.sendMessage(targetJid, {
+                text: "You currently have no special roles assigned.",
+              });
             } else if (roles.length === 1) {
-                await sock.sendMessage(targetJid, { text: `You have received the role of ${roles[0]}` });
+              await sock.sendMessage(targetJid, {
+                text: `You have received the role of ${roles[0]}`,
+              });
             } else {
-                const formattedRoles = roles.slice(0, -1).join(', ') + ' & ' + roles[roles.length - 1];
-                await sock.sendMessage(targetJid, { text: `You have received the role of ${roles[roles.length - 1]}! You now have ${formattedRoles}` });
+              const formattedRoles =
+                roles.slice(0, -1).join(", ") + " & " + roles[roles.length - 1];
+              await sock.sendMessage(targetJid, {
+                text: `You have received the role of ${roles[roles.length - 1]}! You now have ${formattedRoles}`,
+              });
             }
-            await sendBotReply(sock, from || "", `Successfully sent ping to ${arg1}.`);
+            await sendBotReply(
+              sock,
+              from || "",
+              `Successfully sent ping to ${arg1}.`,
+            );
           } catch (e) {
-            await sendBotReply(sock, from || "", `Failed to send ping to ${arg1}.`);
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to send ping to ${arg1}.`,
+            );
           }
           continue;
         }
@@ -1180,7 +1200,9 @@ async function startBot(): Promise<void> {
               `No users found with role "${normalizedWork}".`,
             );
           } else {
-            const formattedUsers = users.map(j => `+${j.split("@")[0]}`).join('\n');
+            const formattedUsers = users
+              .map((j) => `+${j.split("@")[0]}`)
+              .join("\n");
             await sendBotReply(
               sock,
               from || "",
