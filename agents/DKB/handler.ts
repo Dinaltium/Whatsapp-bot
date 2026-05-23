@@ -3,7 +3,7 @@ import {
   addMentor,
   deleteMentor,
   updateMentorField,
-  isWorkerAuthorized,
+  userHasPermission,
 } from "../../storage/dk24Store";
 import {
   popUserMessage,
@@ -94,7 +94,8 @@ export async function handleMessage(
     );
     delete session.pendingMentor;
     const isAuthorized =
-      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
+      isAdmin ||
+      (senderJid && (await userHasPermission(senderJid, "mentor.manage")));
     if (!isAuthorized) {
       return {
         reply: formatBotReply(
@@ -151,7 +152,8 @@ export async function handleMessage(
     );
     delete session.pendingEdit;
     const isAuthorized =
-      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
+      isAdmin ||
+      (senderJid && (await userHasPermission(senderJid, "mentor.manage")));
     if (!isAuthorized) {
       return {
         reply: formatBotReply(
@@ -296,7 +298,8 @@ export async function handleMessage(
   if (lowerPrompt.startsWith("addmentor")) {
     popUserMessage(session, userPrompt);
     const isAuthorized =
-      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
+      isAdmin ||
+      (senderJid && (await userHasPermission(senderJid, "mentor.manage")));
     if (!isAuthorized) {
       return {
         reply: formatBotReply(
@@ -437,7 +440,8 @@ export async function handleMessage(
   if (lowerPrompt.startsWith("editmentor")) {
     popUserMessage(session, userPrompt);
     const isAuthorized =
-      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
+      isAdmin ||
+      (senderJid && (await userHasPermission(senderJid, "mentor.manage")));
     if (!isAuthorized) {
       return {
         reply: formatBotReply(
@@ -528,7 +532,8 @@ export async function handleMessage(
   if (lowerPrompt.startsWith("delmentor")) {
     popUserMessage(session, userPrompt);
     const isAuthorized =
-      isAdmin || (senderJid && (await isWorkerAuthorized(senderJid, "mentor")));
+      isAdmin ||
+      (senderJid && (await userHasPermission(senderJid, "mentor.manage")));
     if (!isAuthorized) {
       return {
         reply: formatBotReply(

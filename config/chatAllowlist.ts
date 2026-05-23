@@ -12,7 +12,6 @@ function normalizeChatJid(
   jid: string | null | undefined,
 ): string | null | undefined {
   if (!jid || typeof jid !== "string") return jid;
-  if (jid.endsWith("@lid")) return jid.replace(/@lid$/, "@s.whatsapp.net");
   return jid;
 }
 
@@ -127,7 +126,6 @@ function getChatBot(
     [
       jid,
       normalizedInput,
-      normalizedInput?.replace(/@s\.whatsapp\.net$/, "@lid"),
     ].filter(Boolean),
   );
 

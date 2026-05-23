@@ -6,10 +6,6 @@ export function normalizeJid(jid: string | null | undefined): string | null | un
   try {
     return jidNormalizedUser(jid);
   } catch (e) {
-    if (jid.endsWith("@lid")) {
-      return jid.replace(/@lid$/, "@s.whatsapp.net");
-    }
-
     if (jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
       return jid.split(":")[0] + "@s.whatsapp.net";
     }
@@ -26,11 +22,11 @@ export function getSenderId(msg: proto.IWebMessageInfo): string {
 
 export function isAdminSender(msg: proto.IWebMessageInfo): boolean {
   if (!msg) return false;
-  if (msg.key?.fromMe) return true;
   const adminEnv = process.env.ADMIN_JIDS || "";
   const admins = adminEnv
     .split(",")
     .map((s) => s.trim())
+    .map((s) => normalizeJid(s))
     .filter(Boolean);
   const senderId = normalizeJid(getSenderId(msg));
   return admins.includes(senderId as string);

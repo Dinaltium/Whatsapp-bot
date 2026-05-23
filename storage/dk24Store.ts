@@ -92,6 +92,42 @@ export interface Mentor {
   created_at?: string;
 }
 
+export const RBAC_PERMISSIONS = [
+  "mentor.manage",
+  "allowlist.manage",
+  "bot.manage",
+  "db.manage",
+  "role.manage",
+] as const;
+
+export type RbacPermission = (typeof RBAC_PERMISSIONS)[number];
+
+export interface RbacRole {
+  name: string;
+  description?: string;
+  permissions: string[];
+  created_at?: string;
+}
+
+export interface DailyUsageResult {
+  allowed: boolean;
+  count: number;
+  limit: number;
+  day: string;
+}
+
+function normalizeRoleName(role: string): string {
+  return role.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function isValidRoleName(role: string): boolean {
+  return /^[a-z][a-z0-9_-]{1,31}$/.test(role);
+}
+
+function isValidPermission(permission: string): permission is RbacPermission {
+  return (RBAC_PERMISSIONS as readonly string[]).includes(permission);
+}
+
 // Bootstrap schema
 export async function ensureSchema(): Promise<void> {
   const pool = getPool();
@@ -143,6 +179,26 @@ export async function ensureSchema(): Promise<void> {
         PRIMARY KEY (jid, role)
       );
 
+      CREATE TABLE IF NOT EXISTS rbac_roles (
+        name TEXT PRIMARY KEY,
+        description TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS rbac_role_permissions (
+        role_name TEXT NOT NULL REFERENCES rbac_roles(name) ON DELETE CASCADE,
+        permission TEXT NOT NULL,
+        granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (role_name, permission)
+      );
+
+      CREATE TABLE IF NOT EXISTS rbac_user_roles (
+        jid TEXT NOT NULL,
+        role_name TEXT NOT NULL REFERENCES rbac_roles(name) ON DELETE CASCADE,
+        assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (jid, role_name)
+      );
+
       CREATE TABLE IF NOT EXISTS dk24_mentors (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -176,10 +232,102 @@ export async function ensureSchema(): Promise<void> {
         bot_number INTEGER NOT NULL DEFAULT 0,
         added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS wa_daily_user_usage (
+        jid TEXT NOT NULL,
+        usage_type TEXT NOT NULL,
+        day DATE NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (jid, usage_type, day)
+      );
+
+      INSERT INTO rbac_roles (name, description)
+      VALUES ('mentor', 'Can manage mentor intake and mentor directory records')
+      ON CONFLICT (name) DO NOTHING;
+
+      INSERT INTO rbac_role_permissions (role_name, permission)
+      VALUES ('mentor', 'mentor.manage')
+      ON CONFLICT (role_name, permission) DO NOTHING;
+
+      INSERT INTO rbac_roles (name, description)
+      SELECT DISTINCT LOWER(TRIM(role)), 'Migrated legacy managed role'
+      FROM dk24_managed_roles
+      WHERE TRIM(role) <> ''
+      ON CONFLICT (name) DO NOTHING;
+
+      INSERT INTO rbac_user_roles (jid, role_name, assigned_at)
+      SELECT jid, LOWER(TRIM(role)), assigned_at
+      FROM dk24_managed_roles
+      WHERE TRIM(role) <> ''
+      ON CONFLICT (jid, role_name) DO NOTHING;
     `);
     console.log("dk24Store database schema verified.");
   } catch (error) {
     console.error("Failed to bootstrap dk24Store schema:", error);
+  }
+}
+
+function getUtcDayBucket(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export async function checkAndIncrementDailyUserUsage(
+  jid: string,
+  usageType: string,
+  limit: number,
+): Promise<DailyUsageResult> {
+  const pool = getPool();
+  const day = getUtcDayBucket();
+  const safeLimit = Math.max(1, Math.floor(limit));
+  const safeUsageType = usageType.trim().toLowerCase() || "ai";
+
+  if (!pool || !jid) {
+    return { allowed: true, count: 0, limit: safeLimit, day };
+  }
+
+  try {
+    const res = await pool.query(
+      `
+      INSERT INTO wa_daily_user_usage (jid, usage_type, day, count)
+      VALUES ($1, $2, $3::date, 1)
+      ON CONFLICT (jid, usage_type, day)
+      DO UPDATE SET
+        count = wa_daily_user_usage.count + 1,
+        last_seen_at = NOW()
+      WHERE wa_daily_user_usage.count < $4
+      RETURNING count
+      `,
+      [jid, safeUsageType, day, safeLimit],
+    );
+
+    if (res.rows.length > 0) {
+      const count = Number(res.rows[0].count || 0);
+      return {
+        allowed: count <= safeLimit,
+        count,
+        limit: safeLimit,
+        day,
+      };
+    }
+
+    const existing = await pool.query(
+      `SELECT count FROM wa_daily_user_usage
+       WHERE jid = $1 AND usage_type = $2 AND day = $3::date
+       LIMIT 1`,
+      [jid, safeUsageType, day],
+    );
+    const count = Number(existing.rows[0]?.count || safeLimit);
+    return {
+      allowed: false,
+      count,
+      limit: safeLimit,
+      day,
+    };
+  } catch (error) {
+    console.error("Error checking daily user usage:", error);
+    return { allowed: true, count: 0, limit: safeLimit, day };
   }
 }
 
@@ -189,12 +337,19 @@ export async function addManagedRole(
 ): Promise<boolean> {
   const pool = getPool();
   if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!jid || !isValidRoleName(normalizedRole)) return false;
   try {
+    const exists = await pool.query(
+      `SELECT 1 FROM rbac_roles WHERE name = $1 LIMIT 1`,
+      [normalizedRole],
+    );
+    if (exists.rows.length === 0) return false;
     await pool.query(
-      `INSERT INTO dk24_managed_roles (jid, role)
+      `INSERT INTO rbac_user_roles (jid, role_name)
        VALUES ($1, $2)
-       ON CONFLICT (jid, role) DO NOTHING`,
-      [jid, role],
+       ON CONFLICT (jid, role_name) DO NOTHING`,
+      [jid, normalizedRole],
     );
     return true;
   } catch (error) {
@@ -209,10 +364,12 @@ export async function isWorkerAuthorized(
 ): Promise<boolean> {
   const pool = getPool();
   if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!jid || !isValidRoleName(normalizedRole)) return false;
   try {
     const res = await pool.query(
-      `SELECT 1 FROM dk24_managed_roles WHERE jid = $1 AND role = $2 LIMIT 1`,
-      [jid, role],
+      `SELECT 1 FROM rbac_user_roles WHERE jid = $1 AND role_name = $2 LIMIT 1`,
+      [jid, normalizedRole],
     );
     return res.rows.length > 0;
   } catch (error) {
@@ -226,10 +383,12 @@ export async function getUsersWithRole(
 ): Promise<string[]> {
   const pool = getPool();
   if (!pool) return [];
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole)) return [];
   try {
     const res = await pool.query(
-      `SELECT jid FROM dk24_managed_roles WHERE role = $1`,
-      [role],
+      `SELECT jid FROM rbac_user_roles WHERE role_name = $1`,
+      [normalizedRole],
     );
     return res.rows.map((row) => row.jid);
   } catch (error) {
@@ -245,13 +404,217 @@ export async function getUserRoles(
   if (!pool) return [];
   try {
     const res = await pool.query(
-      `SELECT role FROM dk24_managed_roles WHERE jid = $1`,
+      `SELECT role_name FROM rbac_user_roles WHERE jid = $1 ORDER BY role_name ASC`,
       [jid],
     );
-    return res.rows.map((row) => row.role);
+    return res.rows.map((row) => row.role_name);
   } catch (error) {
     console.error("Error fetching custom roles for user:", error);
     return [];
+  }
+}
+
+export function listAvailablePermissions(): string[] {
+  return [...RBAC_PERMISSIONS];
+}
+
+export async function createManagedRole(
+  role: string,
+  description: string = "",
+): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole)) return false;
+
+  try {
+    await pool.query(
+      `INSERT INTO rbac_roles (name, description)
+       VALUES ($1, $2)
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description`,
+      [normalizedRole, description || null],
+    );
+    return true;
+  } catch (error) {
+    console.error("Error creating managed role:", error);
+    return false;
+  }
+}
+
+export async function deleteManagedRole(role: string): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole)) return false;
+
+  try {
+    const res = await pool.query(`DELETE FROM rbac_roles WHERE name = $1`, [
+      normalizedRole,
+    ]);
+    return (res.rowCount ?? 0) > 0;
+  } catch (error) {
+    console.error("Error deleting managed role:", error);
+    return false;
+  }
+}
+
+export async function managedRoleExists(role: string): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole)) return false;
+
+  try {
+    const res = await pool.query(
+      `SELECT 1 FROM rbac_roles WHERE name = $1 LIMIT 1`,
+      [normalizedRole],
+    );
+    return res.rows.length > 0;
+  } catch (error) {
+    console.error("Error checking managed role:", error);
+    return false;
+  }
+}
+
+export async function grantRolePermission(
+  role: string,
+  permission: string,
+): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole) || !isValidPermission(permission)) {
+    return false;
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO rbac_role_permissions (role_name, permission)
+       VALUES ($1, $2)
+       ON CONFLICT (role_name, permission) DO NOTHING`,
+      [normalizedRole, permission],
+    );
+    return true;
+  } catch (error) {
+    console.error("Error granting role permission:", error);
+    return false;
+  }
+}
+
+export async function revokeRolePermission(
+  role: string,
+  permission: string,
+): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole) || !isValidPermission(permission)) {
+    return false;
+  }
+
+  try {
+    const res = await pool.query(
+      `DELETE FROM rbac_role_permissions WHERE role_name = $1 AND permission = $2`,
+      [normalizedRole, permission],
+    );
+    return (res.rowCount ?? 0) > 0;
+  } catch (error) {
+    console.error("Error revoking role permission:", error);
+    return false;
+  }
+}
+
+export async function revokeManagedRole(
+  jid: string,
+  role: string,
+): Promise<boolean> {
+  const pool = getPool();
+  if (!pool) return false;
+  const normalizedRole = normalizeRoleName(role);
+  if (!jid || !isValidRoleName(normalizedRole)) return false;
+
+  try {
+    const res = await pool.query(
+      `DELETE FROM rbac_user_roles WHERE jid = $1 AND role_name = $2`,
+      [jid, normalizedRole],
+    );
+    return (res.rowCount ?? 0) > 0;
+  } catch (error) {
+    console.error("Error revoking managed role:", error);
+    return false;
+  }
+}
+
+export async function userHasPermission(
+  jid: string,
+  permission: string,
+): Promise<boolean> {
+  const pool = getPool();
+  if (!pool || !jid || !isValidPermission(permission)) return false;
+  try {
+    const res = await pool.query(
+      `SELECT 1
+       FROM rbac_user_roles ur
+       JOIN rbac_role_permissions rp ON rp.role_name = ur.role_name
+       WHERE ur.jid = $1 AND rp.permission = $2
+       LIMIT 1`,
+      [jid, permission],
+    );
+    return res.rows.length > 0;
+  } catch (error) {
+    console.error("Error checking RBAC permission:", error);
+    return false;
+  }
+}
+
+export async function listManagedRoles(): Promise<RbacRole[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const res = await pool.query(
+      `SELECT r.name, r.description, r.created_at,
+              COALESCE(
+                ARRAY_AGG(rp.permission ORDER BY rp.permission)
+                FILTER (WHERE rp.permission IS NOT NULL),
+                ARRAY[]::TEXT[]
+              ) AS permissions
+       FROM rbac_roles r
+       LEFT JOIN rbac_role_permissions rp ON rp.role_name = r.name
+       GROUP BY r.name, r.description, r.created_at
+       ORDER BY r.name ASC`,
+    );
+    return res.rows as RbacRole[];
+  } catch (error) {
+    console.error("Error listing managed roles:", error);
+    return [];
+  }
+}
+
+export async function getManagedRole(role: string): Promise<RbacRole | null> {
+  const pool = getPool();
+  if (!pool) return null;
+  const normalizedRole = normalizeRoleName(role);
+  if (!isValidRoleName(normalizedRole)) return null;
+
+  try {
+    const res = await pool.query(
+      `SELECT r.name, r.description, r.created_at,
+              COALESCE(
+                ARRAY_AGG(rp.permission ORDER BY rp.permission)
+                FILTER (WHERE rp.permission IS NOT NULL),
+                ARRAY[]::TEXT[]
+              ) AS permissions
+       FROM rbac_roles r
+       LEFT JOIN rbac_role_permissions rp ON rp.role_name = r.name
+       WHERE r.name = $1
+       GROUP BY r.name, r.description, r.created_at
+       LIMIT 1`,
+      [normalizedRole],
+    );
+    return (res.rows[0] as RbacRole) || null;
+  } catch (error) {
+    console.error("Error fetching managed role:", error);
+    return null;
   }
 }
 
@@ -1376,5 +1739,3 @@ export async function searchEventsGlobally(query: string): Promise<Event[]> {
     return [];
   }
 }
-
-

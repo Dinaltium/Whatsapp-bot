@@ -662,6 +662,15 @@ async function startBot(): Promise<void> {
             "• !delmentor <id_or_name> - Remove a mentor (Authorized only)",
             "• !<question> - Chat directly with DKB (e.g. !What is a good way to host an AI meetup?)",
           ].join("\n");
+        } else if (botNumber === 3) {
+          helpText = [
+            "TEMP - Sarcastic & Banter Shenanigans Assistant",
+            "Available Commands (Authorized Admins Only):",
+            "• !ping - Check status",
+            "• !hello - Check availability",
+            "• !reset - Reset your conversation context",
+            "• !<kannada/tulu text or translate request> - Translates and does brutal, funny banter explanations",
+          ].join("\n");
         } else {
           // Default to Bot 0 (PARAG)
           helpText = [
@@ -926,7 +935,7 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !changebot <jid> <bot-number>\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB`,
+              `Usage: !changebot <jid> <bot-number>\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: TEMP`,
             );
             continue;
           }
@@ -1261,6 +1270,10 @@ async function startBot(): Promise<void> {
           isAdminSender(msg),
           senderId,
         );
+
+        if (!agentResult.reply) {
+          continue;
+        }
 
         if (agentResult.domainLocked) {
           await sendBotReply(sock, from || "", agentResult.reply);

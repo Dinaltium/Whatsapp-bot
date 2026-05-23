@@ -1,6 +1,7 @@
 import ParagAgent from "./ParagAgent";
 import EmbedclubAgent from "./EmbedclubAgent";
 import DKBAgent from "./DKBAgent";
+import TempAgent from "./TempAgent";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -72,6 +73,13 @@ const BOTS_REGISTRY: BotConfig[] = [
     description: "DK24 (Developer Kommunity 24) assistant for collaborative coding and events",
     handler: (session, userPrompt, groqApiKey, groqModel, isAdmin, senderJid) =>
       DKBAgent.handleMessage(session, userPrompt, groqApiKey, groqModel, isAdmin, senderJid),
+  },
+  {
+    id: 3,
+    name: "TEMP",
+    description: "Temporary bot for admin shenanigans (translation, banter, friendly throw-hands)",
+    handler: (session, userPrompt, groqApiKey, groqModel, isAdmin) =>
+      TempAgent.handleMessage(session, userPrompt, groqApiKey, groqModel, isAdmin),
   },
 ];
 
