@@ -77,7 +77,7 @@ const BOTS_REGISTRY: BotConfig[] = [
   {
     id: 3,
     name: "Sajige Bajil",
-    description: "Temporary bot for admin shenanigans (Sajige Bajil Kannada/Tulu banter and translations)",
+    description: "Cry about it",
     handler: (session, userPrompt, groqApiKey, groqModel, isAdmin) =>
       TempAgent.handleMessage(session, userPrompt, groqApiKey, groqModel, isAdmin),
   },
