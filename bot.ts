@@ -491,38 +491,61 @@ async function startBot(): Promise<void> {
       if (msg.key?.fromMe && sock.user?.id) {
         senderId = normalizeJid(sock.user.id) as string;
       } else if (senderId && senderId.endsWith("@lid") && from.endsWith("@g.us")) {
+        const rawLid = senderId;
+        let lidResolved = false;
+
+        // Strategy 1: Baileys native signalRepository.lidMapping (most reliable)
         try {
-          const metadata = await sock.groupMetadata(from);
-          if (metadata && metadata.participants) {
-            // Normalize both sides before comparing — participant.lid can carry
-            // a device suffix (e.g. 136249264357588:0@lid) that normalizeJid strips.
-            const participant = metadata.participants.find((p: any) => {
-              const normalizedLid = p.lid ? (normalizeJid(p.lid) ?? p.lid) : null;
-              const normalizedId  = p.id  ? (normalizeJid(p.id)  ?? p.id)  : null;
-              return normalizedLid === senderId || normalizedId === senderId;
-            });
-            if (participant && participant.id) {
-              const resolvedId = normalizeJid(participant.id);
-              if (resolvedId && !resolvedId.endsWith("@lid")) {
-                logStructured({
-                  event: "lid_resolved",
-                  rawLid: getJidHash(senderId),
-                  resolvedHash: getJidHash(resolvedId),
-                });
-                senderId = resolvedId;
-              }
-            } else {
-              // Participant not found in metadata — log for diagnostics
-              logStructured({
-                event: "lid_resolution_failed",
-                rawLidHash: getJidHash(senderId),
-                groupHash: getJidHash(from),
-                participantCount: metadata.participants.length,
-              });
+          const lidNum = rawLid.split("@")[0];
+          const pn = (sock as any).signalRepository?.lidMapping?.getPNForLID?.(lidNum);
+          if (pn && typeof pn === "string") {
+            const resolvedId = normalizeJid(`${pn}@s.whatsapp.net`);
+            if (resolvedId && !resolvedId.endsWith("@lid")) {
+              logStructured({ event: "lid_resolved_via_signal", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
+              senderId = resolvedId;
+              lidResolved = true;
             }
           }
-        } catch (err) {
-          console.warn("Failed to resolve LID from group metadata:", err);
+        } catch (_e) { /* signalRepository not available — fall through */ }
+
+        // Strategy 2: Group metadata participant scan
+        if (!lidResolved) {
+          try {
+            const metadata = await sock.groupMetadata(from);
+            if (metadata && metadata.participants) {
+              const participant = metadata.participants.find((p: any) => {
+                const normalizedLid = p.lid ? (normalizeJid(p.lid) ?? p.lid) : null;
+                return normalizedLid === rawLid;
+              });
+              if (participant && participant.id) {
+                const resolvedId = normalizeJid(participant.id);
+                if (resolvedId && !resolvedId.endsWith("@lid")) {
+                  logStructured({ event: "lid_resolved_via_metadata", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
+                  senderId = resolvedId;
+                  lidResolved = true;
+                }
+              } else {
+                // Log every participant's lid vs our rawLid so we can diagnose
+                logStructured({
+                  event: "lid_resolution_failed",
+                  rawLid,
+                  rawLidHash: getJidHash(rawLid),
+                  groupHash: getJidHash(from),
+                  participantCount: metadata.participants.length,
+                  sampleLids: metadata.participants.slice(0, 5).map((p: any) => ({
+                    lid: p.lid ?? null,
+                    normalizedLid: p.lid ? (normalizeJid(p.lid) ?? null) : null,
+                  })),
+                });
+              }
+            }
+          } catch (err) {
+            console.warn("Failed to resolve LID from group metadata:", err);
+          }
+        }
+
+        if (!lidResolved) {
+          logStructured({ event: "lid_unresolved", rawLid, groupHash: getJidHash(from) });
         }
       }
 
