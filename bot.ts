@@ -233,6 +233,8 @@ function shouldSkipMessage(
         reason: "admin_required",
         command: commandName,
         userHash: getJidHash(from),
+        rawParticipant: msg.key?.participant || "none",
+        resolvedSenderId: resolvedSenderId || "none",
       });
       return true;
     }
@@ -485,7 +487,9 @@ async function startBot(): Promise<void> {
       if (!from) continue;
 
       let senderId = getSenderId(msg);
-      if (senderId && senderId.endsWith("@lid") && from.endsWith("@g.us")) {
+      if (msg.key?.fromMe && sock.user?.id) {
+        senderId = normalizeJid(sock.user.id) as string;
+      } else if (senderId && senderId.endsWith("@lid") && from.endsWith("@g.us")) {
         try {
           const metadata = await sock.groupMetadata(from);
           if (metadata && metadata.participants) {
