@@ -60,6 +60,7 @@ interface UserSession {
 
 const userAiSessions = new Map<string, UserSession>();
 const lastSentMessages = new Map<string, string>();
+const lastUserMessages = new Map<string, string>();
 
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
@@ -477,6 +478,11 @@ async function startBot(): Promise<void> {
       const from = msg.key?.remoteJid;
       const textRaw = extractMessageText(msg.message);
       const text = textRaw ? textRaw.trim() : null;
+
+      if (from && text) {
+        const senderId = getSenderId(msg);
+        lastUserMessages.set(`${from}:${senderId}`, text);
+      }
 
       // ── INTRO DETECTION ──────────────────────────────────────────────────
       // Runs on ALL non-command messages in bot-2 groups.
@@ -1259,11 +1265,25 @@ async function startBot(): Promise<void> {
       clearRateLimitNotice(from || "", senderId);
 
       try {
-        addSessionMessage(session, "user", userPrompt);
+        let finalPrompt = userPrompt;
+        if (botNumber === 3) {
+          const mentionedJids = extractMentionedJids(msg);
+          if (mentionedJids.length > 0) {
+            const targetJid = mentionedJids[0];
+            const lastMsg = lastUserMessages.get(`${from}:${targetJid}`);
+            if (lastMsg) {
+              finalPrompt = `[CONTEXT: The last message sent by @${targetJid.split("@")[0]} in this group was: "${lastMsg}"]. ${userPrompt}`;
+            } else {
+              finalPrompt = `[CONTEXT: No recent message was captured in the cache for @${targetJid.split("@")[0]}]. ${userPrompt}`;
+            }
+          }
+        }
+
+        addSessionMessage(session, "user", finalPrompt);
 
         const agentResult = await WhatsAppAgent.handleAgentMessage(
           session,
-          userPrompt,
+          finalPrompt,
           GROQ_API_KEY,
           GROQ_MODEL,
           botNumber,

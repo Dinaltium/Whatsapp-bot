@@ -18,17 +18,7 @@ interface AgentResult {
 }
 
 function formatBotReply(text: string): string {
-  const cleanedText = String(text || "").trim();
-  if (!cleanedText) {
-    return "";
-  }
-  
-  const r = Math.random();
-  if (r < 0.70) {
-    return cleanedText;
-  } else {
-    return `*TEMP*\n\n${cleanedText}`;
-  }
+  return String(text || "").trim();
 }
 
 export async function handleMessage(
