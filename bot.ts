@@ -198,9 +198,11 @@ function shouldSkipMessage(
   const normalizedText = String(text || "")
     .trim()
     .toLowerCase();
-  const commandName = normalizedText.startsWith(COMMAND_PREFIX)
+  let commandName = normalizedText.startsWith(COMMAND_PREFIX)
     ? normalizedText.slice(COMMAND_PREFIX.length).split(/\s+/)[0]
     : "";
+  if (commandName === "removegroup") commandName = "rmgroup";
+  if (commandName === "removechat") commandName = "rmchat";
 
   const isCommand = normalizedText.startsWith(COMMAND_PREFIX);
   const isAdmin = isAdminSender(msg);
@@ -722,7 +724,9 @@ async function startBot(): Promise<void> {
       }
 
       const parts = userPrompt.split(/\s+/);
-      const cmdName = (parts[0] || "").toLowerCase();
+      let cmdName = (parts[0] || "").toLowerCase();
+      if (cmdName === "removegroup") cmdName = "rmgroup";
+      if (cmdName === "removechat") cmdName = "rmchat";
       const cmdArgs = parts.slice(1);
 
 
@@ -784,7 +788,9 @@ async function startBot(): Promise<void> {
                   ? "ECB"
                   : entry.botNumber === 2
                     ? "DKB"
-                    : "PARAG";
+                    : entry.botNumber === 3
+                      ? "Sajige Bajil"
+                      : "PARAG";
               return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
             });
             await sendBotReply(
@@ -804,7 +810,7 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !${cmdName} <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB`,
+              `Usage: !${cmdName} <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: Sajige Bajil`,
             );
             continue;
           }
@@ -866,7 +872,9 @@ async function startBot(): Promise<void> {
                   ? "ECB"
                   : entry.botNumber === 2
                     ? "DKB"
-                    : "PARAG";
+                    : entry.botNumber === 3
+                      ? "Sajige Bajil"
+                      : "PARAG";
               return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
             });
             await sendBotReply(
@@ -886,7 +894,7 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !${cmdName} <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB`,
+              `Usage: !${cmdName} <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: Sajige Bajil`,
             );
             continue;
           }
