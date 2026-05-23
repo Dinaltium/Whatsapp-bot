@@ -9,6 +9,13 @@ export function normalizeJid(jid: string | null | undefined): string | null | un
   // Strip leading plus symbol if present
   cleaned = cleaned.replace(/^\+/, "");
 
+  // Handle device indicators (e.g. 1234:1@s.whatsapp.net or 1234:1@lid)
+  if (cleaned.includes(":")) {
+    const parts = cleaned.split(":");
+    const domainPart = parts[1].includes("@") ? parts[1].split("@")[1] : "s.whatsapp.net";
+    cleaned = parts[0] + "@" + domainPart;
+  }
+
   // If bare number, append domain
   if (cleaned && !cleaned.includes("@")) {
     cleaned = cleaned + "@s.whatsapp.net";
@@ -17,10 +24,6 @@ export function normalizeJid(jid: string | null | undefined): string | null | un
   try {
     return jidNormalizedUser(cleaned);
   } catch (e) {
-    if (cleaned.includes(":") && cleaned.endsWith("@s.whatsapp.net")) {
-      return cleaned.split(":")[0] + "@s.whatsapp.net";
-    }
-
     return cleaned;
   }
 }
