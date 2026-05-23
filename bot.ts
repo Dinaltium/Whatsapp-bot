@@ -14,29 +14,26 @@ import DKBAgent from "./agents/DKBAgent";
 import groupConfig from "./config/groupAllowlist";
 import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
+import { getJidHash, logStructured } from "./utils/logger";
+import { normalizeJid, getSenderId, isAdminSender, isAdminAction } from "./security/rbac";
+import {
+  checkAiRateLimit,
+  checkGroupAndGlobalLimits,
+  shouldSendRateLimitNotice,
+  formatRetryAfter,
+  incrementGlobalDailyAiCount,
+  clearRateLimitNotice,
+} from "./security/rateLimiter";
 
 const COMMAND_PREFIX = "!";
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const ALLOW_FROM_ME_MESSAGES =
-  (process.env.ALLOW_FROM_ME_MESSAGES || "true").toLowerCase() === "true";
-const AI_WINDOW_MS = 60 * 1000;
-const AI_MAX_REQUESTS_PER_WINDOW = 5;
-const AI_COOLDOWN_MS = 8 * 1000;
+  (process.env.ALLOW_FROM_ME_MESSAGES || "false").toLowerCase() === "true";
 const AI_SESSION_TTL_MS = 15 * 60 * 1000;
 const AI_MAX_SESSION_MESSAGES = 8;
 
-interface RateLimitState {
-  windowStart: number;
-  requestCount: number;
-  lastRequestAt: number;
-}
 
-interface RateLimitCheck {
-  allowed: boolean;
-  reason?: string;
-  retryAfterMs?: number;
-}
 
 interface UserSession {
   domainUnlocked: boolean;
@@ -61,14 +58,8 @@ interface UserSession {
   };
 }
 
-interface RateLimitNotice {
-  reason: string;
-  notifiedAt: number;
-}
-
-const userAiRateLimits = new Map<string, RateLimitState>();
-const userAiRateLimitNotices = new Map<string, RateLimitNotice>();
 const userAiSessions = new Map<string, UserSession>();
+const lastSentMessages = new Map<string, string>();
 
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
@@ -134,8 +125,28 @@ async function sendBotReply(
   to: string,
   text: string,
 ): Promise<void> {
+  try {
+    // Notify composing/typing presence
+    await sock.sendPresenceUpdate("composing", to);
+  } catch (err) {
+    console.error("Failed to send presence update:", err);
+  }
+
+  // Calculate delay based on length of response or a solid randomized human delay
+  // Min 1200ms, Max 4500ms
+  const delay = Math.floor(Math.random() * (4500 - 1200 + 1)) + 1200;
+  await new Promise((resolve) => setTimeout(resolve, delay));
+
+  try {
+    // Notify paused presence before sending message
+    await sock.sendPresenceUpdate("paused", to);
+  } catch (err) {}
+
+  const trimmedText = String(text || "").trim();
+  lastSentMessages.set(to, trimmedText);
+
   await sock.sendMessage(to, {
-    text: String(text || "").trim(),
+    text: trimmedText,
   });
 }
 
@@ -170,6 +181,19 @@ function shouldSkipMessage(
     return true;
   }
 
+  // Anti-echo & duplicate bot response suppression
+  if (from) {
+    const lastSent = lastSentMessages.get(from);
+    if (lastSent && lastSent === String(text || "").trim()) {
+      logStructured({
+        event: "command_skipped",
+        reason: "echo_detected",
+        userHash: getJidHash(from),
+      });
+      return true;
+    }
+  }
+
   const normalizedText = String(text || "")
     .trim()
     .toLowerCase();
@@ -197,34 +221,46 @@ function shouldSkipMessage(
   ];
 
   if (isCommand) {
-    console.log(
-      `[DEBUG] Potential command detected: "${text}" from JID: "${from}" (IsAdmin: ${isAdmin}, MsgId: ${msgId})`,
-    );
+    logStructured({
+      event: "command_detected",
+      command: commandName,
+      userHash: getJidHash(from),
+      isAdmin,
+      msgId,
+    });
   }
 
   if (adminOnlyCommands.includes(commandName)) {
     if (!isAdmin) {
-      console.log(
-        `[DEBUG] Skipped command '${commandName}': Administrative permission required (sender is not admin).`,
-      );
+      logStructured({
+        event: "command_skipped",
+        reason: "admin_required",
+        command: commandName,
+        userHash: getJidHash(from),
+      });
       return true;
     }
   }
 
   if (msg.key?.fromMe && !ALLOW_FROM_ME_MESSAGES) {
     if (isCommand) {
-      console.log(
-        `[DEBUG] Skipped command '${commandName}': Message is from self (fromMe = true) and ALLOW_FROM_ME_MESSAGES is disabled.`,
-      );
+      logStructured({
+        event: "command_skipped",
+        reason: "from_self",
+        command: commandName,
+        userHash: getJidHash(from),
+      });
     }
     return true;
   }
 
   if (!from) {
     if (isCommand) {
-      console.log(
-        `[DEBUG] Skipped command '${commandName}': Remote JID (from) is missing.`,
-      );
+      logStructured({
+        event: "command_skipped",
+        reason: "missing_jid",
+        command: commandName,
+      });
     }
     return true;
   }
@@ -241,18 +277,24 @@ function shouldSkipMessage(
     if (from.endsWith("@g.us")) {
       if (!groupConfig.isGroupAllowed(from)) {
         if (isCommand) {
-          console.log(
-            `[DEBUG] Skipped command '${commandName}': Group JID "${from}" is not in groupConfig allowlist.`,
-          );
+          logStructured({
+            event: "command_skipped",
+            reason: "group_not_allowed",
+            command: commandName,
+            userHash: getJidHash(from),
+          });
         }
         return true;
       }
     } else {
       if (!chatConfig.isChatAllowed(from)) {
         if (isCommand) {
-          console.log(
-            `[DEBUG] Skipped command '${commandName}': Chat JID "${from}" is not in chatConfig allowlist.`,
-          );
+          logStructured({
+            event: "command_skipped",
+            reason: "chat_not_allowed",
+            command: commandName,
+            userHash: getJidHash(from),
+          });
         }
         return true;
       }
@@ -271,42 +313,12 @@ function shouldSkipMessage(
     return true;
   }
 
-  console.log(
-    `[DEBUG] Command matches rules and is approved for processing: "${text}"`,
-  );
+  logStructured({
+    event: "command_approved",
+    command: commandName,
+    userHash: getJidHash(from),
+  });
   return false;
-}
-
-function getSenderId(msg: proto.IWebMessageInfo): string {
-  return normalizeJid(msg.key?.participant || msg.key?.remoteJid || "unknown") as string;
-}
-
-function normalizeJid(
-  jid: string | null | undefined,
-): string | null | undefined {
-  if (!jid || typeof jid !== "string") return jid;
-
-  if (jid.endsWith("@lid")) {
-    return jid.replace(/@lid$/, "@s.whatsapp.net");
-  }
-
-  if (jid.includes(":") && jid.endsWith("@s.whatsapp.net")) {
-    return jid.split(":")[0] + "@s.whatsapp.net";
-  }
-
-  return jid;
-}
-
-function isAdminSender(msg: proto.IWebMessageInfo): boolean {
-  if (!msg) return false;
-  if (msg.key?.fromMe) return true;
-  const adminEnv = process.env.ADMIN_JIDS || "";
-  const admins = adminEnv
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const senderId = normalizeJid(getSenderId(msg));
-  return admins.includes(senderId as string);
 }
 
 /** Extracts @mentioned JIDs from a WhatsApp extended text message. */
@@ -314,94 +326,6 @@ function extractMentionedJids(msg: proto.IWebMessageInfo): string[] {
   const jids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
   if (!jids || !Array.isArray(jids)) return [];
   return jids.filter((j): j is string => typeof j === "string");
-}
-
-function buildRateLimitKey(from: string, senderId: string): string {
-  return `${from}:${senderId}`;
-}
-
-function getRateLimitState(key: string): RateLimitState {
-  if (!userAiRateLimits.has(key)) {
-    userAiRateLimits.set(key, {
-      windowStart: Date.now(),
-      requestCount: 0,
-      lastRequestAt: 0,
-    });
-  }
-
-  return userAiRateLimits.get(key)!;
-}
-
-function checkAiRateLimit(from: string, senderId: string): RateLimitCheck {
-  const now = Date.now();
-  const key = buildRateLimitKey(from, senderId);
-  const state = getRateLimitState(key);
-
-  if (now - state.windowStart >= AI_WINDOW_MS) {
-    state.windowStart = now;
-    state.requestCount = 0;
-  }
-
-  const cooldownRemaining = AI_COOLDOWN_MS - (now - state.lastRequestAt);
-
-  if (cooldownRemaining > 0) {
-    return {
-      allowed: false,
-      reason: "cooldown",
-      retryAfterMs: cooldownRemaining,
-    };
-  }
-
-  if (state.requestCount >= AI_MAX_REQUESTS_PER_WINDOW) {
-    return {
-      allowed: false,
-      reason: "window-limit",
-      retryAfterMs: AI_WINDOW_MS - (now - state.windowStart),
-    };
-  }
-
-  state.requestCount += 1;
-  state.lastRequestAt = now;
-
-  return {
-    allowed: true,
-  };
-}
-
-function clearRateLimitNotice(from: string, senderId: string): void {
-  const key = buildRateLimitKey(from, senderId);
-  userAiRateLimitNotices.delete(key);
-}
-
-function shouldSendRateLimitNotice(
-  from: string,
-  senderId: string,
-  rateLimitCheck: RateLimitCheck,
-): boolean {
-  if (rateLimitCheck?.allowed) {
-    clearRateLimitNotice(from, senderId);
-    return false;
-  }
-
-  const key = buildRateLimitKey(from, senderId);
-  const existing = userAiRateLimitNotices.get(key);
-  const reason = rateLimitCheck?.reason || "unknown";
-
-  if (existing?.reason === reason) {
-    return false;
-  }
-
-  userAiRateLimitNotices.set(key, {
-    reason,
-    notifiedAt: Date.now(),
-  });
-
-  return true;
-}
-
-function formatRetryAfter(ms: number): string {
-  const seconds = Math.max(1, Math.ceil(ms / 1000));
-  return `${seconds}s`;
 }
 
 function buildSessionKey(from: string, senderId: string): string {
@@ -507,44 +431,45 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
-    console.log(
-      `[DEBUG] Connection state transition: connection = "${connection || "N/A"}", qrCodePresent = ${!!qr}`,
-    );
+    logStructured({
+      event: "connection_transition",
+      connection: connection || "N/A",
+      qrCodePresent: !!qr,
+    });
 
     if (qr) {
       qrcode.generate(qr, {
         small: true,
       });
-
-      console.log("Scan QR");
+      logStructured({ event: "qr_generated" });
     }
 
     if (connection === "open") {
-      console.log("PARAG connected.");
+      logStructured({ event: "connection_open", service: "PARAG" });
     }
 
     if (connection === "close") {
       const err = lastDisconnect?.error as any;
       const statusCode = err?.output?.statusCode || err?.statusCode;
 
-      console.log("Connection closed");
-      console.log("Reason:", statusCode);
+      logStructured({
+        event: "connection_closed",
+        statusCode,
+      });
 
       if (statusCode === 515) {
-        console.log("Restart required. Reconnecting...");
+        logStructured({ event: "reconnecting", reason: "restart_required" });
 
         setTimeout(() => {
           startBot();
         }, 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
-        console.log("Logged out.");
+        logStructured({ event: "connection_logout" });
       } else if (statusCode === DisconnectReason.connectionReplaced) {
-        console.log(
-          "Connection replaced (440). Another instance connected! Exiting to prevent conflict...",
-        );
+        logStructured({ event: "connection_replaced", error: "another_instance" });
         process.exit(0);
       } else {
-        console.log("Reconnecting...");
+        logStructured({ event: "reconnecting", reason: "generic_close" });
 
         setTimeout(() => {
           startBot();
@@ -554,9 +479,11 @@ async function startBot(): Promise<void> {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    console.log(
-      `[DEBUG] Received messages.upsert event (type: "${type}", messageCount: ${messages.length})`,
-    );
+    logStructured({
+      event: "messages_received",
+      type,
+      count: messages.length,
+    });
     for (const msg of messages) {
       const from = msg.key?.remoteJid;
       const textRaw = extractMessageText(msg.message);
@@ -593,9 +520,12 @@ async function startBot(): Promise<void> {
                   groupJid: from,
                   triggeredAt: Date.now(),
                 });
-                console.log(
-                  `[DEBUG] Intro tracker: watching ${normalized} in ${from}`,
-                );
+                logStructured({
+                  event: "intro_tracker_watch",
+                  bot: 2,
+                  groupHash: getJidHash(from),
+                  targetHash: getJidHash(normalized),
+                });
               }
             }
             // Fallback: extract phone numbers from text when no @mention
@@ -610,9 +540,12 @@ async function startBot(): Promise<void> {
                     groupJid: from,
                     triggeredAt: Date.now(),
                   });
-                  console.log(
-                    `[DEBUG] Intro tracker: watching phone-derived ${derivedJid} in ${from}`,
-                  );
+                  logStructured({
+                    event: "intro_tracker_watch_phone",
+                    bot: 2,
+                    groupHash: getJidHash(from),
+                    targetHash: getJidHash(derivedJid),
+                  });
                 }
               }
             }
@@ -639,9 +572,11 @@ async function startBot(): Promise<void> {
           }
 
           if (trackedGroupJid && trackedGroupJid === from && text.length > 20) {
-            console.log(
-              `[DEBUG] Intro captured from ${introSenderId}, running classification...`,
-            );
+            logStructured({
+              event: "intro_captured",
+              bot: 2,
+              userHash: getJidHash(introSenderId),
+            });
             try {
               const senderPhone = introSenderId.replace(/@.*/, "");
               const result = await DKBAgent.classifyAndAutoAddMentor(
@@ -652,16 +587,18 @@ async function startBot(): Promise<void> {
                 GROQ_MODEL,
               );
               if (result.isMentor) {
-                console.log(
-                  `[DEBUG] Intro classified as MENTOR: ${
-                    result.mentorName || introSenderId
-                  } — adding to directory and allowchats`,
-                );
+                logStructured({
+                  event: "intro_classified",
+                  result: "mentor",
+                  userHash: getJidHash(introSenderId),
+                });
                 await chatConfig.addChat(introSenderId, 2);
               } else {
-                console.log(
-                  `[DEBUG] Intro classified as STUDENT: ${introSenderId} — ignoring`,
-                );
+                logStructured({
+                  event: "intro_classified",
+                  result: "student",
+                  userHash: getJidHash(introSenderId),
+                });
               }
             } catch (err) {
               console.error("[DEBUG] Intro classification error:", err);
@@ -692,7 +629,12 @@ async function startBot(): Promise<void> {
         botNumber = chatBot?.botNumber || 0;
       }
 
-      console.log(`[DEBUG] Processing command: "${command}"`);
+      logStructured({
+        event: "command_processing",
+        command: command.split(/\s+/)[0],
+        bot: botNumber,
+        userHash: getJidHash(from),
+      });
 
       if (command === "!ping") {
         await sendBotReply(sock, from || "", "pong");
@@ -779,16 +721,7 @@ async function startBot(): Promise<void> {
       const cmdName = (parts[0] || "").toLowerCase();
       const cmdArgs = parts.slice(1);
 
-      function isAdminAction(): boolean {
-        if (msg.key?.fromMe) return true;
-        const adminEnv = process.env.ADMIN_JIDS || "";
-        const admins = adminEnv
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const senderId = normalizeJid(getSenderId(msg));
-        return admins.includes(senderId as string);
-      }
+
 
       if (cmdName === "getjid") {
         if (from?.endsWith("@g.us")) {
@@ -823,7 +756,7 @@ async function startBot(): Promise<void> {
           "neonconnect",
         ].includes(cmdName)
       ) {
-        if (!isAdminAction()) {
+        if (!isAdminAction(msg)) {
           await sendBotReply(
             sock,
             from || "",
@@ -1127,7 +1060,7 @@ async function startBot(): Promise<void> {
           continue;
         }
 
-        if (!isAdminAction()) {
+        if (!isAdminAction(msg)) {
           await sendBotReply(
             sock,
             from || "",
@@ -1158,7 +1091,20 @@ async function startBot(): Promise<void> {
             );
             continue;
           }
-          const targetJid = `${numberMatch[1]}@s.whatsapp.net`;
+          const rawPhone = numberMatch[1];
+          let targetJid = `${rawPhone}@s.whatsapp.net`;
+          try {
+            const waResult = await sock.onWhatsApp(rawPhone);
+            if (waResult && waResult.length > 0 && waResult[0].exists) {
+              targetJid = waResult[0].jid;
+            } else {
+                await sendBotReply(sock, from || "", `Number +${rawPhone} is not registered on WhatsApp.`);
+                continue;
+            }
+          } catch(err) {
+            console.error("onWhatsApp error:", err);
+          }
+
           try {
             const { getUserRoles } = await import("./storage/dk24Store");
             const roles = await getUserRoles(targetJid);
@@ -1228,7 +1174,19 @@ async function startBot(): Promise<void> {
         }
 
         const rawPhone = numberMatch[1];
-        const targetJid = `${rawPhone}@s.whatsapp.net`;
+        let targetJid = `${rawPhone}@s.whatsapp.net`;
+        
+        try {
+          const waResult = await sock.onWhatsApp(rawPhone);
+          if (waResult && waResult.length > 0 && waResult[0].exists) {
+            targetJid = waResult[0].jid;
+          } else {
+             await sendBotReply(sock, from || "", `Warning: Number +${rawPhone} does not appear to be registered on WhatsApp. Cannot assign role.`);
+             continue;
+          }
+        } catch(err) {
+            console.error("onWhatsApp error:", err);
+        }
 
         const { addManagedRole } = await import("./storage/dk24Store");
         const ok = await addManagedRole(targetJid, normalizedWork);
@@ -1247,6 +1205,43 @@ async function startBot(): Promise<void> {
           );
         }
         continue;
+      }
+
+      // Check Group & Global limits and burst protection
+      if (from) {
+        const groupLimit = checkGroupAndGlobalLimits(from);
+        if (!groupLimit.allowed) {
+          if (groupLimit.reason === "muted") {
+            logStructured({
+              event: "command_skipped",
+              reason: "group_muted_burst_protection",
+              userHash: getJidHash(from),
+            });
+          } else if (groupLimit.reason === "hourly_limit") {
+            logStructured({
+              event: "command_skipped",
+              reason: "group_hourly_limit_reached",
+              userHash: getJidHash(from),
+            });
+            await sendBotReply(
+              sock,
+              from,
+              "Group command limit reached for this hour. Please try again later."
+            );
+          } else if (groupLimit.reason === "global_limit") {
+            logStructured({
+              event: "command_skipped",
+              reason: "global_daily_limit_reached",
+              userHash: getJidHash(from),
+            });
+            await sendBotReply(
+              sock,
+              from,
+              "Global AI assistant daily quota reached. Please try again tomorrow."
+            );
+          }
+          continue;
+        }
       }
 
       const rateLimitCheck = checkAiRateLimit(from || "", senderId);
@@ -1292,6 +1287,7 @@ async function startBot(): Promise<void> {
         session.domainUnlocked = true;
         addSessionMessage(session, "assistant", agentResult.reply);
         session.lastActiveAt = Date.now();
+        incrementGlobalDailyAiCount();
 
         await sendBotReply(sock, from || "", agentResult.reply);
       } catch (error) {
