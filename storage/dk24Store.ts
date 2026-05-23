@@ -62,7 +62,7 @@ function getPool(): Pool | null {
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
-          : { rejectUnauthorized: false },
+          : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" },
     });
 
     dbPool.on("error", (err) => {

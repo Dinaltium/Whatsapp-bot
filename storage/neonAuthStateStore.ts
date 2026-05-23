@@ -6,6 +6,7 @@ import {
   AuthenticationState,
   AuthenticationCreds,
 } from "@whiskeysockets/baileys";
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
 
 const AUTH_TABLE = "wa_auth_state";
 const DEFAULT_NAMESPACE = "parag";
@@ -28,27 +29,60 @@ function getJwtSecret(): string | null {
   return process.env.AUTH_STATE_JWT_SECRET || null;
 }
 
+function getEncryptionKey(): Buffer | null {
+  const secret = process.env.AUTH_STATE_KEY || process.env.AUTH_STATE_JWT_SECRET || null;
+  if (!secret) return null;
+  return scryptSync(secret, "dk24_auth_salt", 32);
+}
+
 function serializeStateValue(value: StorageValue): string {
   const json = JSON.stringify(value, BufferJSON.replacer);
-  const secret = getJwtSecret();
+  const key = getEncryptionKey();
 
-  if (!secret) {
-    return `json:${json}`;
+  if (!key) {
+    throw new Error(
+      "FATAL: Both AUTH_STATE_KEY and AUTH_STATE_JWT_SECRET are missing. Authentication state MUST be encrypted in production."
+    );
   }
 
-  const token = jwt.sign({ data: json }, secret, { algorithm: "HS256" });
-  return `jwt:${token}`;
+  const iv = randomBytes(12); // 12-byte IV for AES-GCM
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  let encrypted = cipher.update(json, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const tag = cipher.getAuthTag().toString("hex");
+
+  return `enc:${iv.toString("hex")}:${tag}:${encrypted}`;
 }
 
 function deserializeStateValue(raw: string): StorageValue {
   if (!raw) return null as any;
+
+  if (raw.startsWith("enc:")) {
+    const key = getEncryptionKey();
+    if (!key) {
+      throw new Error(
+        "AUTH_STATE_KEY or AUTH_STATE_JWT_SECRET is required to decrypt auth state.",
+      );
+    }
+    const parts = raw.split(":");
+    const iv = Buffer.from(parts[1], "hex");
+    const tag = Buffer.from(parts[2], "hex");
+    const encrypted = parts[3];
+
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    let decrypted = decipher.update(encrypted, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+
+    return JSON.parse(decrypted, BufferJSON.reviver);
+  }
 
   if (raw.startsWith("jwt:")) {
     const token = raw.slice(4);
     const secret = getJwtSecret();
     if (!secret) {
       throw new Error(
-        "AUTH_STATE_JWT_SECRET is required to read JWT-wrapped auth state.",
+        "AUTH_STATE_JWT_SECRET is required to read legacy JWT-wrapped auth state.",
       );
     }
 
@@ -148,6 +182,12 @@ async function readMany(
 async function useNeonAuthState(
   namespace = DEFAULT_NAMESPACE,
 ): Promise<AuthStateStore> {
+  if (!getEncryptionKey()) {
+    throw new Error(
+      "FATAL: Both AUTH_STATE_KEY and AUTH_STATE_JWT_SECRET are missing. Authentication state MUST be encrypted in production. Please set AUTH_STATE_KEY in your environment."
+    );
+  }
+
   const databaseUrl = getDatabaseUrl();
 
   if (!databaseUrl) {
@@ -164,7 +204,7 @@ async function useNeonAuthState(
       process.env.DATABASE_SSL === "false"
         ? false
         : {
-            rejectUnauthorized: false,
+            rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
           },
   });
 

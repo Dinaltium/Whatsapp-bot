@@ -14,6 +14,9 @@ interface RateLimitState {
   windowStart: number;
   requestCount: number;
   lastRequestAt: number;
+  bannedUntil?: number;
+  banCount?: number;
+  consecutiveViolations?: number;
 }
 
 interface RateLimitCheck {
@@ -44,6 +47,21 @@ const userAiRateLimits = new Map<string, RateLimitState>();
 const userAiRateLimitNotices = new Map<string, RateLimitNotice>();
 const groupRateLimitStates = new Map<string, GroupRateLimitState>();
 
+// Periodic memory pruning to prevent OOM memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, state] of userAiRateLimits.entries()) {
+    if (now - state.lastRequestAt > 2 * 60 * 60 * 1000) {
+      userAiRateLimits.delete(key);
+    }
+  }
+  for (const [key, notice] of userAiRateLimitNotices.entries()) {
+    if (now - notice.notifiedAt > 2 * 60 * 60 * 1000) {
+      userAiRateLimitNotices.delete(key);
+    }
+  }
+}, 30 * 60 * 1000); // Check every 30 minutes
+
 export let globalDailyAiCount = 0;
 export let globalCountResetTime = Date.now() + 24 * 60 * 60 * 1000;
 
@@ -61,6 +79,8 @@ function getRateLimitState(key: string): RateLimitState {
       windowStart: Date.now(),
       requestCount: 0,
       lastRequestAt: 0,
+      consecutiveViolations: 0,
+      banCount: 0,
     });
   }
   return userAiRateLimits.get(key)!;
@@ -71,6 +91,14 @@ export function checkAiRateLimit(from: string, senderId: string): RateLimitCheck
   const key = buildRateLimitKey(from, senderId);
   const state = getRateLimitState(key);
 
+  if (state.bannedUntil && state.bannedUntil > now) {
+    return {
+      allowed: false,
+      reason: "banned",
+      retryAfterMs: state.bannedUntil - now,
+    };
+  }
+
   if (now - state.windowStart >= AI_WINDOW_MS) {
     state.windowStart = now;
     state.requestCount = 0;
@@ -79,6 +107,22 @@ export function checkAiRateLimit(from: string, senderId: string): RateLimitCheck
   const cooldownRemaining = AI_COOLDOWN_MS - (now - state.lastRequestAt);
 
   if (cooldownRemaining > 0) {
+    state.consecutiveViolations = (state.consecutiveViolations || 0) + 1;
+    state.lastRequestAt = now; // update to prolong cooldown penalty
+    
+    if (state.consecutiveViolations >= 3) {
+      const banCount = (state.banCount || 0) + 1;
+      state.banCount = banCount;
+      const banDuration = 5 * 60 * 1000 * Math.pow(2, banCount - 1); // 5m, 10m, 20m...
+      state.bannedUntil = now + banDuration;
+      state.consecutiveViolations = 0;
+      return {
+        allowed: false,
+        reason: "banned-trigger",
+        retryAfterMs: banDuration,
+      };
+    }
+
     return {
       allowed: false,
       reason: "cooldown",
@@ -87,6 +131,22 @@ export function checkAiRateLimit(from: string, senderId: string): RateLimitCheck
   }
 
   if (state.requestCount >= AI_MAX_REQUESTS_PER_WINDOW) {
+    state.consecutiveViolations = (state.consecutiveViolations || 0) + 1;
+    state.lastRequestAt = now;
+
+    if (state.consecutiveViolations >= 3) {
+      const banCount = (state.banCount || 0) + 1;
+      state.banCount = banCount;
+      const banDuration = 5 * 60 * 1000 * Math.pow(2, banCount - 1);
+      state.bannedUntil = now + banDuration;
+      state.consecutiveViolations = 0;
+      return {
+        allowed: false,
+        reason: "banned-trigger",
+        retryAfterMs: banDuration,
+      };
+    }
+
     return {
       allowed: false,
       reason: "window-limit",
@@ -94,6 +154,7 @@ export function checkAiRateLimit(from: string, senderId: string): RateLimitCheck
     };
   }
 
+  state.consecutiveViolations = 0;
   state.requestCount += 1;
   state.lastRequestAt = now;
 
@@ -101,6 +162,7 @@ export function checkAiRateLimit(from: string, senderId: string): RateLimitCheck
     allowed: true,
   };
 }
+
 
 export function clearRateLimitNotice(from: string, senderId: string): void {
   const key = buildRateLimitKey(from, senderId);

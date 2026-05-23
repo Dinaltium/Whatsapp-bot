@@ -31,19 +31,18 @@ export function getSenderId(msg: proto.IWebMessageInfo): string {
   ) as string;
 }
 
-export function isAdminSender(msg: proto.IWebMessageInfo): boolean {
+export function isAdminSender(msg: proto.IWebMessageInfo, resolvedSenderId?: string): boolean {
   if (!msg) return false;
-  if (msg.key?.fromMe) return true;
   const adminEnv = process.env.ADMIN_JIDS || "";
   const admins = adminEnv
     .split(",")
     .map((s) => s.trim())
     .map((s) => normalizeJid(s))
     .filter(Boolean);
-  const senderId = normalizeJid(getSenderId(msg));
+  const senderId = normalizeJid(resolvedSenderId || getSenderId(msg));
   return admins.includes(senderId as string);
 }
 
-export function isAdminAction(msg: proto.IWebMessageInfo): boolean {
-  return isAdminSender(msg);
+export function isAdminAction(msg: proto.IWebMessageInfo, resolvedSenderId?: string): boolean {
+  return isAdminSender(msg, resolvedSenderId);
 }

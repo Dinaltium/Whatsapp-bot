@@ -9,3 +9,19 @@ export function sanitizeForPrompt(input?: any): string {
     .replace(/<\/?[^>]+(>|$)/g, "") // strip html/xml tag boundaries to prevent prompt jailbreaks
     .trim();
 }
+
+export function hasPromptInjection(input: string): boolean {
+  if (!input) return false;
+  const lower = input.toLowerCase();
+  const injectionPatterns = [
+    /ignore\s+(?:all\s+)?(?:previous\s+)?(?:instructions|directives|rules|guidelines|guardrails|prompts)/i,
+    /system\s+prompt/i,
+    /bypass\s+(?:the\s+)?(?:guardrails|rules|system|security)/i,
+    /you\s+must\s+now/i,
+    /disregard\s+prior/i,
+    /override\s+instructions/i,
+    /acting\s+as\s+an?/i,
+  ];
+  return injectionPatterns.some((pattern) => pattern.test(lower));
+}
+

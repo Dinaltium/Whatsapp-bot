@@ -175,6 +175,7 @@ function shouldSkipMessage(
   msg: proto.IWebMessageInfo,
   from: string | null | undefined,
   text: string | null,
+  resolvedSenderId?: string,
 ): boolean {
   const msgId = msg.key?.id || "unknown";
 
@@ -205,7 +206,7 @@ function shouldSkipMessage(
   if (commandName === "removechat") commandName = "rmchat";
 
   const isCommand = normalizedText.startsWith(COMMAND_PREFIX);
-  const isAdmin = isAdminSender(msg);
+  const isAdmin = isAdminSender(msg, resolvedSenderId);
 
   // Public utility commands that can be run in any group or DM (even unapproved ones)
   const publicExemptCommands = ["getjid", "whoami"];
@@ -481,8 +482,26 @@ async function startBot(): Promise<void> {
       const textRaw = extractMessageText(msg.message);
       const text = textRaw ? textRaw.trim() : null;
 
-      if (from && text) {
-        const senderId = getSenderId(msg);
+      if (!from) continue;
+
+      let senderId = getSenderId(msg);
+      if (senderId && senderId.endsWith("@lid") && from.endsWith("@g.us")) {
+        try {
+          const metadata = await sock.groupMetadata(from);
+          if (metadata && metadata.participants) {
+            const participant = metadata.participants.find(
+              (p: any) => p.lid === senderId || p.id === senderId
+            );
+            if (participant && participant.id) {
+              senderId = participant.id;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to resolve LID from group metadata:", err);
+        }
+      }
+
+      if (text) {
         lastUserMessages.set(`${from}:${senderId}`, text);
       }
 
@@ -494,13 +513,13 @@ async function startBot(): Promise<void> {
       //           → classify via AI, auto-add if mentor, give chatConfig access.
       if (
         text &&
-        from?.endsWith("@g.us") &&
+        from.endsWith("@g.us") &&
         !text.startsWith(COMMAND_PREFIX) &&
         msg.message
       ) {
         const introGroupBot = groupConfig.getGroupBot(from);
         if (introGroupBot?.botNumber === 2) {
-          const introSenderId = normalizeJid(getSenderId(msg)) || "";
+          const introSenderId = normalizeJid(senderId) || "";
           const hasTriggerWord = /\bintroduce\b|\bwelcome\b/i.test(text);
 
           // --- Phase 1: detect trigger and register JIDs to watch ---
@@ -606,12 +625,11 @@ async function startBot(): Promise<void> {
       }
       // ── END INTRO DETECTION ──────────────────────────────────────────────
 
-      if (shouldSkipMessage(msg, from, text)) {
+      if (shouldSkipMessage(msg, from, text, senderId)) {
         continue;
       }
 
       const command = text!.toLowerCase();
-      const senderId = getSenderId(msg);
       const session = getOrCreateSession(from || "", senderId);
 
       resetSessionIfExpired(session);
@@ -741,7 +759,6 @@ async function startBot(): Promise<void> {
       }
 
       if (cmdName === "whoami") {
-        const senderId = getSenderId(msg);
         const normalized = normalizeJid(senderId);
         await sendBotReply(
           sock,
@@ -764,7 +781,7 @@ async function startBot(): Promise<void> {
           "neonconnect",
         ].includes(cmdName)
       ) {
-        if (!isAdminAction(msg)) {
+        if (!isAdminAction(msg, senderId)) {
           await sendBotReply(
             sock,
             from || "",
@@ -1072,7 +1089,7 @@ async function startBot(): Promise<void> {
           continue;
         }
 
-        if (!isAdminAction(msg)) {
+        if (!isAdminAction(msg, senderId)) {
           await sendBotReply(
             sock,
             from || "",
@@ -1295,7 +1312,7 @@ async function startBot(): Promise<void> {
           GROQ_API_KEY,
           GROQ_MODEL,
           botNumber,
-          isAdminSender(msg),
+          isAdminSender(msg, senderId),
           senderId,
         );
 

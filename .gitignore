@@ -41,3 +41,4 @@ Thumbs.db
 # Puppeteer Cache
 .puppeteer_cache/
 
+test.ts
