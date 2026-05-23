@@ -221,7 +221,8 @@ function shouldSkipMessage(
     "changebot",
     "neonping",
     "neonconnect",
-    "manage",
+    // NOTE: "manage" is NOT here — it has its own RBAC gate inside the handler
+    // that allows both admins AND users with the role.manage permission.
   ];
 
 
@@ -493,11 +494,31 @@ async function startBot(): Promise<void> {
         try {
           const metadata = await sock.groupMetadata(from);
           if (metadata && metadata.participants) {
-            const participant = metadata.participants.find(
-              (p: any) => p.lid === senderId || p.id === senderId
-            );
+            // Normalize both sides before comparing — participant.lid can carry
+            // a device suffix (e.g. 136249264357588:0@lid) that normalizeJid strips.
+            const participant = metadata.participants.find((p: any) => {
+              const normalizedLid = p.lid ? (normalizeJid(p.lid) ?? p.lid) : null;
+              const normalizedId  = p.id  ? (normalizeJid(p.id)  ?? p.id)  : null;
+              return normalizedLid === senderId || normalizedId === senderId;
+            });
             if (participant && participant.id) {
-              senderId = participant.id;
+              const resolvedId = normalizeJid(participant.id);
+              if (resolvedId && !resolvedId.endsWith("@lid")) {
+                logStructured({
+                  event: "lid_resolved",
+                  rawLid: getJidHash(senderId),
+                  resolvedHash: getJidHash(resolvedId),
+                });
+                senderId = resolvedId;
+              }
+            } else {
+              // Participant not found in metadata — log for diagnostics
+              logStructured({
+                event: "lid_resolution_failed",
+                rawLidHash: getJidHash(senderId),
+                groupHash: getJidHash(from),
+                participantCount: metadata.participants.length,
+              });
             }
           }
         } catch (err) {
@@ -1093,11 +1114,17 @@ async function startBot(): Promise<void> {
           continue;
         }
 
-        if (!isAdminAction(msg, senderId)) {
+        const isManageAdmin = isAdminAction(msg, senderId);
+        const isManageAuthorized = isManageAdmin ||
+          (senderId && await (async () => {
+            const { userHasPermission } = await import("./storage/dk24Store");
+            return userHasPermission(senderId, "role.manage");
+          })());
+        if (!isManageAuthorized) {
           await sendBotReply(
             sock,
             from || "",
-            "Unauthorized: admin privileges required for that command.",
+            "Unauthorized: you need admin privileges or the role.manage permission to use this command.",
           );
           continue;
         }
