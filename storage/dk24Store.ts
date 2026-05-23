@@ -243,6 +243,16 @@ export async function ensureSchema(): Promise<void> {
         PRIMARY KEY (jid, usage_type, day)
       );
 
+      -- Maps WhatsApp LID identifiers to canonical phone JIDs.
+      -- Populated when !manage assigns a role and the person's LID
+      -- is found in group metadata. Used to resolve @lid senders
+      -- to their @s.whatsapp.net JID for RBAC permission checks.
+      CREATE TABLE IF NOT EXISTS wa_lid_phone_map (
+        lid TEXT PRIMARY KEY,
+        phone_jid TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       INSERT INTO rbac_roles (name, description)
       VALUES ('mentor', 'Can manage mentor intake and mentor directory records')
       ON CONFLICT (name) DO NOTHING;
@@ -355,6 +365,52 @@ export async function addManagedRole(
   } catch (error) {
     console.error("⚠️ Error adding managed role:", error);
     return false;
+  }
+}
+
+/**
+ * Stores a LID → phone JID mapping so that group members who appear
+ * as @lid senders can be resolved to their canonical phone JID for
+ * RBAC permission checks.
+ */
+export async function storeLidPhoneMapping(
+  lid: string,
+  phoneJid: string,
+): Promise<void> {
+  const pool = getPool();
+  if (!pool || !lid || !phoneJid) return;
+  if (!lid.endsWith("@lid")) return;
+  if (!phoneJid.endsWith("@s.whatsapp.net")) return;
+  try {
+    await pool.query(
+      `INSERT INTO wa_lid_phone_map (lid, phone_jid, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (lid) DO UPDATE SET phone_jid = EXCLUDED.phone_jid, updated_at = NOW()`,
+      [lid, phoneJid],
+    );
+  } catch (error) {
+    console.error("⚠️ Error storing LID phone mapping:", error);
+  }
+}
+
+/**
+ * Resolves a @lid JID to its canonical @s.whatsapp.net JID.
+ * Returns null if no mapping is found.
+ */
+export async function resolvePhoneJidFromLid(
+  lid: string,
+): Promise<string | null> {
+  const pool = getPool();
+  if (!pool || !lid || !lid.endsWith("@lid")) return null;
+  try {
+    const res = await pool.query(
+      `SELECT phone_jid FROM wa_lid_phone_map WHERE lid = $1 LIMIT 1`,
+      [lid],
+    );
+    return (res.rows[0]?.phone_jid as string) || null;
+  } catch (error) {
+    console.error("⚠️ Error resolving LID:", error);
+    return null;
   }
 }
 
@@ -551,16 +607,47 @@ export async function userHasPermission(
 ): Promise<boolean> {
   const pool = getPool();
   if (!pool || !jid || !isValidPermission(permission)) return false;
+
+  // If the caller is a @lid sender, try to resolve to phone JID first.
+  // This handles group members whose messages arrive with a LID identifier
+  // but whose roles were stored under their canonical phone JID.
+  let effectiveJid = jid;
+  if (jid.endsWith("@lid")) {
+    const resolved = await resolvePhoneJidFromLid(jid);
+    if (resolved) {
+      effectiveJid = resolved;
+    } else {
+      // No mapping found — try with the raw LID too (in case it was stored directly)
+      // by falling through with the original jid below.
+    }
+  }
+
   try {
+    // Check with effective JID (resolved phone JID, or original LID)
     const res = await pool.query(
       `SELECT 1
        FROM rbac_user_roles ur
        JOIN rbac_role_permissions rp ON rp.role_name = ur.role_name
        WHERE ur.jid = $1 AND rp.permission = $2
        LIMIT 1`,
-      [jid, permission],
+      [effectiveJid, permission],
     );
-    return res.rows.length > 0;
+    if (res.rows.length > 0) return true;
+
+    // If we resolved but still failed, also try the raw LID (belt-and-suspenders)
+    if (effectiveJid !== jid) {
+      const res2 = await pool.query(
+        `SELECT 1
+         FROM rbac_user_roles ur
+         JOIN rbac_role_permissions rp ON rp.role_name = ur.role_name
+         WHERE ur.jid = $1 AND rp.permission = $2
+         LIMIT 1`,
+        [jid, permission],
+      );
+      return res2.rows.length > 0;
+    }
+
+    return false;
   } catch (error) {
     console.error("Error checking RBAC permission:", error);
     return false;

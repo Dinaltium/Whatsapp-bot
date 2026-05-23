@@ -494,19 +494,36 @@ async function startBot(): Promise<void> {
         const rawLid = senderId;
         let lidResolved = false;
 
-        // Strategy 1: Baileys native signalRepository.lidMapping (most reliable)
+        // Strategy 0: DB mapping table (most reliable — populated by !manage)
         try {
-          const lidNum = rawLid.split("@")[0];
-          const pn = (sock as any).signalRepository?.lidMapping?.getPNForLID?.(lidNum);
-          if (pn && typeof pn === "string") {
-            const resolvedId = normalizeJid(`${pn}@s.whatsapp.net`);
-            if (resolvedId && !resolvedId.endsWith("@lid")) {
-              logStructured({ event: "lid_resolved_via_signal", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
-              senderId = resolvedId;
-              lidResolved = true;
-            }
+          const { resolvePhoneJidFromLid } = await import("./storage/dk24Store");
+          const dbResolved = await resolvePhoneJidFromLid(rawLid);
+          if (dbResolved) {
+            logStructured({ event: "lid_resolved_via_db", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(dbResolved) });
+            senderId = dbResolved;
+            lidResolved = true;
           }
-        } catch (_e) { /* signalRepository not available — fall through */ }
+        } catch (_e) { /* db unavailable — fall through */ }
+
+        // Strategy 1: Baileys native signalRepository.lidMapping
+        if (!lidResolved) {
+          try {
+            const lidNum = rawLid.split("@")[0];
+            const pn = (sock as any).signalRepository?.lidMapping?.getPNForLID?.(lidNum);
+            if (pn && typeof pn === "string") {
+              const resolvedId = normalizeJid(`${pn}@s.whatsapp.net`);
+              if (resolvedId && !resolvedId.endsWith("@lid")) {
+                logStructured({ event: "lid_resolved_via_signal", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
+                senderId = resolvedId;
+                lidResolved = true;
+                // Persist so future messages use Strategy 0
+                import("./storage/dk24Store").then(({ storeLidPhoneMapping }) =>
+                  storeLidPhoneMapping(rawLid, resolvedId)
+                ).catch(() => {});
+              }
+            }
+          } catch (_e) { /* signalRepository not available — fall through */ }
+        }
 
         // Strategy 2: Group metadata participant scan
         if (!lidResolved) {
@@ -523,6 +540,10 @@ async function startBot(): Promise<void> {
                   logStructured({ event: "lid_resolved_via_metadata", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
                   senderId = resolvedId;
                   lidResolved = true;
+                  // Persist so future messages use Strategy 0
+                  import("./storage/dk24Store").then(({ storeLidPhoneMapping }) =>
+                    storeLidPhoneMapping(rawLid, resolvedId)
+                  ).catch(() => {});
                 }
               } else {
                 // Log every participant's lid vs our rawLid so we can diagnose
@@ -1271,7 +1292,7 @@ async function startBot(): Promise<void> {
             console.error("onWhatsApp error:", err);
         }
 
-        const { addManagedRole } = await import("./storage/dk24Store");
+        const { addManagedRole, storeLidPhoneMapping } = await import("./storage/dk24Store");
         const ok = await addManagedRole(targetJid, normalizedWork);
 
         if (ok) {
@@ -1280,6 +1301,26 @@ async function startBot(): Promise<void> {
             from || "",
             `Successfully assigned role "${normalizedWork}" to ${arg2}.`,
           );
+
+          // Immediately try to find and store this person's LID from the current
+          // group so that when they send messages as @lid we can resolve them.
+          if (from && from.endsWith("@g.us")) {
+            try {
+              const meta = await sock.groupMetadata(from);
+              const normalizedTarget = targetJid.toLowerCase();
+              const match = meta.participants.find((p: any) => {
+                const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
+                return pid === normalizedTarget;
+              });
+              if (match?.lid) {
+                const normalizedLid = normalizeJid(match.lid);
+                if (normalizedLid && normalizedLid.endsWith("@lid")) {
+                  await storeLidPhoneMapping(normalizedLid, targetJid);
+                  logStructured({ event: "lid_mapped_on_manage", role: normalizedWork, phoneHash: getJidHash(targetJid), lidHash: getJidHash(normalizedLid) });
+                }
+              }
+            } catch (_e) { /* group metadata unavailable — skip */ }
+          }
         } else {
           await sendBotReply(
             sock,
