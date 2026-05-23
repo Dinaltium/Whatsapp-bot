@@ -14,7 +14,7 @@ import DKBAgent from "./agents/DKBAgent";
 import groupConfig from "./config/groupAllowlist";
 import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
-import { getJidHash, logStructured } from "./utils/logger";
+import { getJidHash, logStructured, logEvent } from "./utils/logger";
 import { normalizeJid, getSenderId, isAdminSender, isAdminAction } from "./security/rbac";
 import {
   checkAiRateLimit,
@@ -220,15 +220,7 @@ function shouldSkipMessage(
     "manage",
   ];
 
-  if (isCommand) {
-    logStructured({
-      event: "command_detected",
-      command: commandName,
-      userHash: getJidHash(from),
-      isAdmin,
-      msgId,
-    });
-  }
+
 
   if (adminOnlyCommands.includes(commandName)) {
     if (!isAdmin) {
@@ -313,11 +305,6 @@ function shouldSkipMessage(
     return true;
   }
 
-  logStructured({
-    event: "command_approved",
-    command: commandName,
-    userHash: getJidHash(from),
-  });
   return false;
 }
 
@@ -479,7 +466,9 @@ async function startBot(): Promise<void> {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    logStructured({
+    if (type === "append") return;
+
+    logEvent("debug", {
       event: "messages_received",
       type,
       count: messages.length,
