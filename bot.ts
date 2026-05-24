@@ -480,18 +480,34 @@ async function startBot(): Promise<void> {
       const { storeLidPhoneMapping } = await import("./storage/dk24Store");
       let stored = 0;
       for (const contact of contacts) {
-        const phoneJid = contact.id;
-        const lid = (contact as any).lid;
-        if (
-          phoneJid && lid &&
-          phoneJid.endsWith("@s.whatsapp.net") &&
-          lid.endsWith("@lid")
-        ) {
-          const normalizedLid = normalizeJid(lid);
-          if (normalizedLid) {
-            await storeLidPhoneMapping(normalizedLid, phoneJid);
-            stored++;
+        if (!contact) continue;
+
+        const cid = contact.id ? normalizeJid(contact.id) : null;
+        const clid = (contact as any).lid ? normalizeJid((contact as any).lid) : null;
+        const cpn = (contact as any).phoneNumber ? normalizeJid((contact as any).phoneNumber) : null;
+
+        let resolvedLid: string | null = null;
+        let resolvedPn: string | null = null;
+
+        // Case A: id is phone JID, lid is LID
+        if (cid && cid.endsWith("@s.whatsapp.net")) {
+          resolvedPn = cid;
+          if (clid && clid.endsWith("@lid")) resolvedLid = clid;
+        }
+        // Case B: id is LID, phoneNumber is phone JID
+        else if (cid && cid.endsWith("@lid")) {
+          resolvedLid = cid;
+          if (cpn && cpn.endsWith("@s.whatsapp.net")) {
+            resolvedPn = cpn;
+          } else if ((contact as any).phone) {
+            const digits = String((contact as any).phone).replace(/\D/g, "");
+            if (digits) resolvedPn = `${digits}@s.whatsapp.net`;
           }
+        }
+
+        if (resolvedLid && resolvedPn) {
+          await storeLidPhoneMapping(resolvedLid, resolvedPn);
+          stored++;
         }
       }
       if (stored > 0) {
@@ -505,17 +521,55 @@ async function startBot(): Promise<void> {
     try {
       const { storeLidPhoneMapping } = await import("./storage/dk24Store");
       for (const participant of update.participants || []) {
-        // In some Baileys versions, participant objects here have both fields
-        const pid = (participant as any).id ?? participant;
-        const plid = (participant as any).lid;
-        if (
-          pid && plid &&
-          typeof pid === "string" && pid.endsWith("@s.whatsapp.net") &&
-          typeof plid === "string" && plid.endsWith("@lid")
-        ) {
-          const normalizedLid = normalizeJid(plid);
-          if (normalizedLid) await storeLidPhoneMapping(normalizedLid, pid);
+        if (!participant) continue;
+        const pid = typeof participant === "string" ? normalizeJid(participant) : (participant.id ? normalizeJid(participant.id) : null);
+        const plid = (participant as any).lid ? normalizeJid((participant as any).lid) : null;
+        const ppn = (participant as any).phoneNumber ? normalizeJid((participant as any).phoneNumber) : null;
+
+        let resolvedLid: string | null = null;
+        let resolvedPn: string | null = null;
+
+        if (pid && pid.endsWith("@s.whatsapp.net")) {
+          resolvedPn = pid;
+          if (plid && plid.endsWith("@lid")) resolvedLid = plid;
+        } else if (pid && pid.endsWith("@lid")) {
+          resolvedLid = pid;
+          if (ppn && ppn.endsWith("@s.whatsapp.net")) {
+            resolvedPn = ppn;
+          } else if ((participant as any).phone) {
+            const digits = String((participant as any).phone).replace(/\D/g, "");
+            if (digits) resolvedPn = `${digits}@s.whatsapp.net`;
+          }
         }
+
+        if (resolvedLid && resolvedPn) {
+          await storeLidPhoneMapping(resolvedLid, resolvedPn);
+        }
+      }
+    } catch (_e) { /* non-critical */ }
+  });
+
+  // ── LID MAPPING VIA NATIVE 6.8.0 EVENT ──────────────────────────────
+  sock.ev.on("lid-mapping.update" as any, async (update: any) => {
+    try {
+      const { storeLidPhoneMapping } = await import("./storage/dk24Store");
+      const items = Array.isArray(update) ? update : [update];
+      let count = 0;
+      for (const item of items) {
+        if (!item) continue;
+        const rawLid = item.lid;
+        const rawPn = item.pn || item.phoneNumber || item.jid || item.id;
+        if (rawLid && rawPn && typeof rawLid === "string" && typeof rawPn === "string") {
+          const normalizedLid = normalizeJid(rawLid);
+          const normalizedPn = normalizeJid(rawPn);
+          if (normalizedLid && normalizedPn && normalizedLid.endsWith("@lid") && normalizedPn.endsWith("@s.whatsapp.net")) {
+            await storeLidPhoneMapping(normalizedLid, normalizedPn);
+            count++;
+          }
+        }
+      }
+      if (count > 0) {
+        logStructured({ event: "lid_mapped_from_event", count });
       }
     } catch (_e) { /* non-critical */ }
   });
@@ -538,7 +592,40 @@ async function startBot(): Promise<void> {
       let senderId = getSenderId(msg);
       if (msg.key?.fromMe && sock.user?.id) {
         senderId = normalizeJid(sock.user.id) as string;
-      } else if (senderId && senderId.endsWith("@lid")) {
+      } else {
+        // ── ZERO-QUERY INSTANT ALTERNATE JID EXTRACTION (Baileys 6.8.0) ──
+        const rawParticipant = msg.key?.participant;
+        const altParticipant = (msg.key as any)?.participantAlt;
+        const rawRemoteJid = msg.key?.remoteJid;
+        const altRemoteJid = (msg.key as any)?.remoteJidAlt;
+
+        let hasAltMapping = false;
+
+        if (rawParticipant && altParticipant && typeof rawParticipant === "string" && typeof altParticipant === "string") {
+          const normalizedLid = normalizeJid(rawParticipant);
+          const normalizedPn = normalizeJid(altParticipant);
+          if (normalizedLid && normalizedPn && normalizedLid.endsWith("@lid") && normalizedPn.endsWith("@s.whatsapp.net")) {
+            senderId = normalizedPn;
+            hasAltMapping = true;
+            import("./storage/dk24Store").then(({ storeLidPhoneMapping }) =>
+              storeLidPhoneMapping(normalizedLid, normalizedPn)
+            ).catch(() => {});
+          }
+        }
+
+        if (!hasAltMapping && rawRemoteJid && altRemoteJid && typeof rawRemoteJid === "string" && typeof altRemoteJid === "string") {
+          const normalizedLid = normalizeJid(rawRemoteJid);
+          const normalizedPn = normalizeJid(altRemoteJid);
+          if (normalizedLid && normalizedPn && normalizedLid.endsWith("@lid") && normalizedPn.endsWith("@s.whatsapp.net")) {
+            hasAltMapping = true;
+            import("./storage/dk24Store").then(({ storeLidPhoneMapping }) =>
+              storeLidPhoneMapping(normalizedLid, normalizedPn)
+            ).catch(() => {});
+          }
+        }
+      }
+
+      if (senderId && senderId.endsWith("@lid")) {
         const rawLid = senderId;
         let lidResolved = false;
 
@@ -564,7 +651,6 @@ async function startBot(): Promise<void> {
                 logStructured({ event: "lid_resolved_via_signal", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
                 senderId = resolvedId;
                 lidResolved = true;
-                // Persist so future messages use Strategy 0
                 import("./storage/dk24Store").then(({ storeLidPhoneMapping }) =>
                   storeLidPhoneMapping(rawLid, resolvedId)
                 ).catch(() => {});
@@ -573,28 +659,44 @@ async function startBot(): Promise<void> {
           } catch (_e) { /* signalRepository not available — fall through */ }
         }
 
-        // Strategy 2: Group metadata participant scan
+        // Strategy 2: Group metadata participant scan (Upgraded for Baileys 6.8.0 Contact changes)
         if (!lidResolved && from.endsWith("@g.us")) {
           try {
             const metadata = await sock.groupMetadata(from);
             if (metadata && metadata.participants) {
               const participant = metadata.participants.find((p: any) => {
-                const normalizedLid = p.lid ? (normalizeJid(p.lid) ?? p.lid) : null;
-                return normalizedLid === rawLid;
+                const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
+                const plid = p.lid ? (normalizeJid(p.lid) ?? "").toLowerCase() : "";
+                const targetLower = rawLid.toLowerCase();
+                return pid === targetLower || plid === targetLower;
               });
-              if (participant && participant.id) {
-                const resolvedId = normalizeJid(participant.id);
+
+              if (participant) {
+                const pid = participant.id ? normalizeJid(participant.id) : null;
+                const ppn = participant.phoneNumber ? normalizeJid(participant.phoneNumber) : null;
+
+                let resolvedId: string | null = null;
+                if (pid && pid.endsWith("@s.whatsapp.net")) {
+                  resolvedId = pid;
+                } else if (ppn && ppn.endsWith("@s.whatsapp.net")) {
+                  resolvedId = ppn;
+                } else if ((participant as any).phone) {
+                  const phoneStr = String((participant as any).phone);
+                  const digits = phoneStr.replace(/\D/g, "");
+                  if (digits) resolvedId = `${digits}@s.whatsapp.net`;
+                }
+
                 if (resolvedId && !resolvedId.endsWith("@lid")) {
                   logStructured({ event: "lid_resolved_via_metadata", rawLidHash: getJidHash(rawLid), resolvedHash: getJidHash(resolvedId) });
                   senderId = resolvedId;
                   lidResolved = true;
-                  // Persist so future messages use Strategy 0
                   import("./storage/dk24Store").then(({ storeLidPhoneMapping }) =>
                     storeLidPhoneMapping(rawLid, resolvedId)
                   ).catch(() => {});
                 }
-              } else {
-                // Log every participant's lid vs our rawLid so we can diagnose
+              }
+
+              if (!lidResolved) {
                 logStructured({
                   event: "lid_resolution_failed",
                   rawLid,
@@ -602,8 +704,9 @@ async function startBot(): Promise<void> {
                   groupHash: getJidHash(from),
                   participantCount: metadata.participants.length,
                   sampleLids: metadata.participants.slice(0, 5).map((p: any) => ({
+                    id: p.id ?? null,
                     lid: p.lid ?? null,
-                    normalizedLid: p.lid ? (normalizeJid(p.lid) ?? null) : null,
+                    phoneNumber: p.phoneNumber ?? null,
                   })),
                 });
               }
@@ -1403,11 +1506,19 @@ async function startBot(): Promise<void> {
             try {
               const meta = await sock.groupMetadata(from);
               const match = meta.participants.find((p: any) => {
+                const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
                 const plid = p.lid ? (normalizeJid(p.lid) ?? "").toLowerCase() : "";
-                return plid === resolvedLid!.toLowerCase();
+                const targetLower = resolvedLid!.toLowerCase();
+                return pid === targetLower || plid === targetLower;
               });
-              if (match?.id) {
-                resolvedPhoneJid = normalizeJid(match.id) || null;
+              if (match) {
+                const pid = match.id ? normalizeJid(match.id) : null;
+                const ppn = match.phoneNumber ? normalizeJid(match.phoneNumber) : null;
+                if (pid && pid.endsWith("@s.whatsapp.net")) {
+                  resolvedPhoneJid = pid;
+                } else if (ppn && ppn.endsWith("@s.whatsapp.net")) {
+                  resolvedPhoneJid = ppn;
+                }
               }
             } catch (_) {}
           }
@@ -1418,10 +1529,18 @@ async function startBot(): Promise<void> {
               const meta = await sock.groupMetadata(from);
               const match = meta.participants.find((p: any) => {
                 const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
-                return pid === resolvedPhoneJid!.toLowerCase();
+                const ppn = p.phoneNumber ? (normalizeJid(p.phoneNumber) ?? "").toLowerCase() : "";
+                const targetLower = resolvedPhoneJid!.toLowerCase();
+                return pid === targetLower || ppn === targetLower;
               });
-              if (match?.lid) {
-                resolvedLid = normalizeJid(match.lid) || null;
+              if (match) {
+                const pid = match.id ? normalizeJid(match.id) : null;
+                const plid = match.lid ? normalizeJid(match.lid) : null;
+                if (pid && pid.endsWith("@lid")) {
+                  resolvedLid = pid;
+                } else if (plid && plid.endsWith("@lid")) {
+                  resolvedLid = plid;
+                }
               }
             } catch (_) {}
           }
