@@ -528,15 +528,7 @@ export async function handleMessageUpsert(
             "• !delmentor -id <id> - Remove a mentor (Authorized only)",
             "• !<question> - Chat directly with DKB (e.g. !What is a good way to host an AI meetup?)",
           ].join("\n");
-        } else if (botNumber === 3) {
-          helpText = [
-            "TEMP - Sarcastic & Banter Shenanigans Assistant",
-            "Available Commands (Authorized Admins Only):",
-            "• !ping - Check status",
-            "• !hello - Check availability",
-            "• !reset - Reset your conversation context",
-            "• !<kannada/tulu text or translate request> - Translates and does brutal, funny banter explanations",
-          ].join("\n");
+
         } else {
           // Default to Bot 0 (PARAG)
           helpText = [
@@ -654,9 +646,7 @@ export async function handleMessageUpsert(
                   ? "ECB"
                   : entry.botNumber === 2
                     ? "DKB"
-                    : entry.botNumber === 3
-                      ? "TEMP"
-                      : "PARAG";
+                    : "PARAG";
               const statusLabel = entry.enabled ? "Enabled" : "Disabled";
               const groupName = await safeGetGroupName(sock, entry.jid);
               return `${entry.id}. ${groupName} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
@@ -686,9 +676,7 @@ export async function handleMessageUpsert(
                   ? "ECB"
                   : entry.botNumber === 2
                     ? "DKB"
-                    : entry.botNumber === 3
-                      ? "TEMP"
-                      : "PARAG";
+                    : "PARAG";
               const statusLabel = entry.enabled ? "Enabled" : "Disabled";
               return `${entry.id}. ${entry.jid} | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
             });
@@ -819,9 +807,7 @@ export async function handleMessageUpsert(
             ? "ECB"
             : groupEntry.botNumber === 2
               ? "DKB"
-              : groupEntry.botNumber === 3
-                ? "TEMP"
-                : "PARAG";
+              : "PARAG";
 
           await sendBotReply(
             sock,
@@ -865,9 +851,7 @@ export async function handleMessageUpsert(
             ? "ECB"
             : chatEntry.botNumber === 2
               ? "DKB"
-              : chatEntry.botNumber === 3
-                ? "TEMP"
-                : "PARAG";
+              : "PARAG";
 
           await sendBotReply(
             sock,
@@ -920,8 +904,8 @@ export async function handleMessageUpsert(
             botNumber: newBotNumber,
           };
 
-          const oldBotLabel = groupEntry.botNumber === 1 ? "ECB" : groupEntry.botNumber === 2 ? "DKB" : groupEntry.botNumber === 3 ? "TEMP" : "PARAG";
-          const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : newBotNumber === 3 ? "TEMP" : "PARAG";
+          const oldBotLabel = groupEntry.botNumber === 1 ? "ECB" : groupEntry.botNumber === 2 ? "DKB" : "PARAG";
+          const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : "PARAG";
 
           await sendBotReply(
             sock,
@@ -972,8 +956,8 @@ export async function handleMessageUpsert(
             botNumber: newBotNumber,
           };
 
-          const oldBotLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : chatEntry.botNumber === 3 ? "TEMP" : "PARAG";
-          const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : newBotNumber === 3 ? "TEMP" : "PARAG";
+          const oldBotLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
+          const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : "PARAG";
 
           await sendBotReply(
             sock,
@@ -1617,18 +1601,7 @@ export async function handleMessageUpsert(
         }
 
         let finalPrompt = userPrompt;
-        if (botNumber === 3) {
-          const mentionedJids = extractMentionedJids(msg);
-          if (mentionedJids.length > 0) {
-            const targetJid = mentionedJids[0];
-            const lastMsg = await getLastUserMessage(`${from}:${targetJid}`);
-            if (lastMsg) {
-              finalPrompt = `[CONTEXT: The last message sent by @${targetJid.split("@")[0]} in this group was: "${lastMsg}"]. ${userPrompt}`;
-            } else {
-              finalPrompt = `[CONTEXT: No recent message was captured in the cache for @${targetJid.split("@")[0]}]. ${userPrompt}`;
-            }
-          }
-        }
+
 
         addSessionMessage(session, "user", finalPrompt);
 
