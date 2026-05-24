@@ -8,7 +8,6 @@ A TypeScript-based WhatsApp bot coordinator designed for the DK24 and ECB develo
   - **Bot 0 (PARAG):** Technical assistant for general coding and hackathons.
   - **Bot 1 (ECB):** ECB-specific bot answering questions about hardware, microcontrollers, and embedded systems.
   - **Bot 2 (DKB):** Community directory coordinator for mentor registrations, calendar events, and intake queries.
-  - **Bot 3 (TEMP):** Kannada/Tulu translator and local cultural guide.
 - **Groq AI Integration:** Multi-turn chat sessions utilizing `llama-3.3-70b-versatile` with restricted prompts focusing on technical topics.
 - **PostgreSQL Session Store:** Session state is saved in Neon PostgreSQL. Supports optional JWT encryption at rest to protect authorization tokens.
 - **Sequential ID Administration:**
@@ -90,7 +89,7 @@ graph TD
     G -->|Muted/Burst Triggered| H[Mute Bot response]
     G -->|Allowed| I[Bot Prompt Selector]
     I -->|Bot 2 DKB| J[Puppeteer Scrapers / Mentor DB]
-    I -->|Bot 0/1/3| K[Groq AI Completion Engine]
+    I -->|Bot 0/1| K[Groq AI Completion Engine]
     K -->|Replies via typing state| L[WhatsApp Send Socket]
 ```
 
