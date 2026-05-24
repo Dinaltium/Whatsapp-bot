@@ -38,7 +38,7 @@ async function init(): Promise<void> {
 
   let dbEntries: GroupEntry[] = [];
   try {
-    const { getAllowedGroups, addAllowedGroup } = await import("../storage/dk24Store");
+    const { getAllowedGroups, addAllowedGroup } = await import("../storage/core/allowlistRepository");
 
     // Sync any env entries that don't exist in DB yet
     const currentDb = await getAllowedGroups();
@@ -115,7 +115,7 @@ async function addGroup(
   ensureLoaded();
 
   try {
-    const { addAllowedGroup } = await import("../storage/dk24Store");
+    const { addAllowedGroup } = await import("../storage/core/allowlistRepository");
     const ok = await addAllowedGroup(jid, botNumber);
     if (ok) {
       await init();
@@ -147,7 +147,7 @@ async function removeGroupById(id: number): Promise<boolean> {
   if (!entry) return false;
 
   try {
-    const { removeAllowedGroupById } = await import("../storage/dk24Store");
+    const { removeAllowedGroupById } = await import("../storage/core/allowlistRepository");
     const ok = await removeAllowedGroupById(id);
     if (ok) {
       await init();
@@ -172,7 +172,7 @@ async function editGroupBot(id: number, botNumber: number): Promise<boolean> {
   if (!entry) return false;
 
   try {
-    const { setGroupBotNumber } = await import("../storage/dk24Store");
+    const { setGroupBotNumber } = await import("../storage/core/allowlistRepository");
     const ok = await setGroupBotNumber(id, botNumber);
     if (ok) {
       await init();
@@ -193,7 +193,7 @@ async function setGroupEnabled(id: number, enabled: boolean): Promise<boolean> {
   if (!entry) return false;
 
   try {
-    const { setGroupEnabled: dbSetEnabled } = await import("../storage/dk24Store");
+    const { setGroupEnabled: dbSetEnabled } = await import("../storage/core/allowlistRepository");
     const ok = await dbSetEnabled(id, enabled);
     if (ok) {
       await init();
