@@ -1,11 +1,6 @@
-import {
-  getMentorById,
-  addMentor,
-  deleteMentor,
-  updateMentorField,
-  userHasPermission,
-  logAction,
-} from "../../storage/dk24Store";
+import { getMentorById, addMentor, deleteMentor, updateMentorField } from "../../storage/DKB/mentorRepository";
+import { userHasPermission } from "../../storage/core/rbacRepository";
+import { logAction } from "../../storage/core/auditRepository";
 import {
   popUserMessage,
   combineCountryCodeAndNumber,
@@ -19,16 +14,16 @@ import {
   isCommunityQuery,
   handleClubsCommand,
   handleClubDetailCommand,
-} from "../../services/communityService";
+} from "../../services/DKB/communityService";
 import {
   handleEventsCommand,
   handleEventDetailCommand,
-} from "../../services/eventService";
+} from "../../services/DKB/eventService";
 import {
   parseMentorCommandArgs,
   parseMentorFlags,
   handleMentorsQuery,
-} from "../../services/mentorService";
+} from "../../services/DKB/mentorService";
 import { getGroqReply } from "./prompt";
 
 interface ConversationMessage {
@@ -226,37 +221,53 @@ export async function handleMessage(
   }
 
   // CLUBS COMMANDS
-  if (lowerPrompt === "clubs") {
-    popUserMessage(session, userPrompt);
-    return { reply: formatBotReply(await handleClubsCommand()), usedAI: false };
-  }
+  if (lowerPrompt === "clubs" || lowerPrompt.startsWith("club")) {
+    const isAllowed = isAdmin || (senderJid && (await userHasPermission(senderJid, "club.manage")));
+    if (!isAllowed) {
+      return {
+        reply: formatBotReply("Unauthorized: You do not have the required role to access Club Commands."),
+        usedAI: false,
+      };
+    }
 
-  if (lowerPrompt.startsWith("club")) {
-    const query = trimmed.slice(4).trim();
-    popUserMessage(session, userPrompt);
-    return {
-      reply: formatBotReply(await handleClubDetailCommand(query)),
-      usedAI: false,
-    };
+    if (lowerPrompt === "clubs") {
+      popUserMessage(session, userPrompt);
+      return { reply: formatBotReply(await handleClubsCommand()), usedAI: false };
+    } else {
+      const query = trimmed.slice(4).trim();
+      popUserMessage(session, userPrompt);
+      return {
+        reply: formatBotReply(await handleClubDetailCommand(query)),
+        usedAI: false,
+      };
+    }
   }
 
   // EVENTS COMMANDS
-  if (lowerPrompt.startsWith("events")) {
-    const query = trimmed.slice(6).trim();
-    popUserMessage(session, userPrompt);
-    return {
-      reply: formatBotReply(await handleEventsCommand(query)),
-      usedAI: false,
-    };
-  }
+  if (lowerPrompt.startsWith("events") || lowerPrompt.startsWith("event")) {
+    const isAllowed = isAdmin || (senderJid && (await userHasPermission(senderJid, "event.manage")));
+    if (!isAllowed) {
+      return {
+        reply: formatBotReply("Unauthorized: You do not have the required role to access Event Commands."),
+        usedAI: false,
+      };
+    }
 
-  if (lowerPrompt.startsWith("event")) {
-    const query = trimmed.slice(5).trim();
-    popUserMessage(session, userPrompt);
-    return {
-      reply: formatBotReply(await handleEventDetailCommand(query)),
-      usedAI: false,
-    };
+    if (lowerPrompt.startsWith("events")) {
+      const query = trimmed.slice(6).trim();
+      popUserMessage(session, userPrompt);
+      return {
+        reply: formatBotReply(await handleEventsCommand(query)),
+        usedAI: false,
+      };
+    } else {
+      const query = trimmed.slice(5).trim();
+      popUserMessage(session, userPrompt);
+      return {
+        reply: formatBotReply(await handleEventDetailCommand(query)),
+        usedAI: false,
+      };
+    }
   }
 
   // MENTOR DIRECTORY
