@@ -472,6 +472,54 @@ async function startBot(): Promise<void> {
     }
   });
 
+  // ── LID MAPPING VIA CONTACT SYNC ──────────────────────────────────────────
+  // When Baileys syncs contacts (on startup and updates), each contact object
+  // may have both id (phone JID) and lid (LID). Persist any new mappings.
+  sock.ev.on("contacts.upsert", async (contacts) => {
+    try {
+      const { storeLidPhoneMapping } = await import("./storage/dk24Store");
+      let stored = 0;
+      for (const contact of contacts) {
+        const phoneJid = contact.id;
+        const lid = (contact as any).lid;
+        if (
+          phoneJid && lid &&
+          phoneJid.endsWith("@s.whatsapp.net") &&
+          lid.endsWith("@lid")
+        ) {
+          const normalizedLid = normalizeJid(lid);
+          if (normalizedLid) {
+            await storeLidPhoneMapping(normalizedLid, phoneJid);
+            stored++;
+          }
+        }
+      }
+      if (stored > 0) {
+        logStructured({ event: "lid_mapped_from_contacts", count: stored });
+      }
+    } catch (_e) { /* non-critical */ }
+  });
+
+  // ── LID MAPPING VIA GROUP PARTICIPANT EVENTS ──────────────────────────────
+  sock.ev.on("group-participants.update", async (update) => {
+    try {
+      const { storeLidPhoneMapping } = await import("./storage/dk24Store");
+      for (const participant of update.participants || []) {
+        // In some Baileys versions, participant objects here have both fields
+        const pid = (participant as any).id ?? participant;
+        const plid = (participant as any).lid;
+        if (
+          pid && plid &&
+          typeof pid === "string" && pid.endsWith("@s.whatsapp.net") &&
+          typeof plid === "string" && plid.endsWith("@lid")
+        ) {
+          const normalizedLid = normalizeJid(plid);
+          if (normalizedLid) await storeLidPhoneMapping(normalizedLid, pid);
+        }
+      }
+    } catch (_e) { /* non-critical */ }
+  });
+
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type === "append") return;
 
@@ -490,7 +538,7 @@ async function startBot(): Promise<void> {
       let senderId = getSenderId(msg);
       if (msg.key?.fromMe && sock.user?.id) {
         senderId = normalizeJid(sock.user.id) as string;
-      } else if (senderId && senderId.endsWith("@lid") && from.endsWith("@g.us")) {
+      } else if (senderId && senderId.endsWith("@lid")) {
         const rawLid = senderId;
         let lidResolved = false;
 
@@ -526,7 +574,7 @@ async function startBot(): Promise<void> {
         }
 
         // Strategy 2: Group metadata participant scan
-        if (!lidResolved) {
+        if (!lidResolved && from.endsWith("@g.us")) {
           try {
             const metadata = await sock.groupMetadata(from);
             if (metadata && metadata.participants) {
@@ -1186,32 +1234,61 @@ async function startBot(): Promise<void> {
         }
 
         if (arg2 === "-p") {
-          const numberMatch = arg1.trim().match(/^\+(\d{7,15})$/);
-          if (!numberMatch) {
-            await sendBotReply(
-              sock,
-              from || "",
-              "Error: Phone number must start with + followed by country code and number, and contain no spaces.\nFormat: +{country_code}{number}\nExample: !manage +919902849280 -p",
-            );
-            continue;
-          }
-          const rawPhone = numberMatch[1];
-          let targetJid = `${rawPhone}@s.whatsapp.net`;
-          try {
-            const waResult = await sock.onWhatsApp(rawPhone);
-            if (waResult && waResult.length > 0 && waResult[0].exists) {
-              targetJid = waResult[0].jid;
-            } else {
-                await sendBotReply(sock, from || "", `Number +${rawPhone} is not registered on WhatsApp.`);
-                continue;
+          let targetJid = "";
+          const inputLabel = arg1.trim();
+
+          if (inputLabel.includes("@")) {
+            const normalized = normalizeJid(inputLabel);
+            if (normalized && (normalized.endsWith("@s.whatsapp.net") || normalized.endsWith("@lid"))) {
+              targetJid = normalized;
             }
-          } catch(err) {
-            console.error("onWhatsApp error:", err);
+          }
+
+          if (!targetJid && /^\d{7,20}$/.test(inputLabel)) {
+            targetJid = `${inputLabel}@s.whatsapp.net`;
+          }
+
+          if (!targetJid) {
+            const numberMatch = inputLabel.match(/^\+(\d{7,15})$/);
+            if (!numberMatch) {
+              await sendBotReply(
+                sock,
+                from || "",
+                "Error: Target must be a JID/LID (e.g. 123@s.whatsapp.net, 456@lid) or a phone number starting with + (e.g. +919902849280).",
+              );
+              continue;
+            }
+            const rawPhone = numberMatch[1];
+            targetJid = `${rawPhone}@s.whatsapp.net`;
+            try {
+              const waResult = await sock.onWhatsApp(rawPhone);
+              if (waResult && waResult.length > 0 && waResult[0].exists) {
+                targetJid = waResult[0].jid;
+              } else {
+                  await sendBotReply(sock, from || "", `Number +${rawPhone} is not registered on WhatsApp.`);
+                  continue;
+              }
+            } catch(err) {
+              console.error("onWhatsApp error:", err);
+            }
+          }
+
+          let effectiveQueryJid = targetJid;
+          if (targetJid.endsWith("@lid")) {
+            try {
+              const { resolvePhoneJidFromLid } = await import("./storage/dk24Store");
+              const resolved = await resolvePhoneJidFromLid(targetJid);
+              if (resolved) effectiveQueryJid = resolved;
+            } catch (_) {}
           }
 
           try {
             const { getUserRoles } = await import("./storage/dk24Store");
-            const roles = await getUserRoles(targetJid);
+            let roles = await getUserRoles(effectiveQueryJid);
+            if (roles.length === 0 && effectiveQueryJid !== targetJid) {
+              roles = await getUserRoles(targetJid);
+            }
+
             if (roles.length === 0) {
               await sock.sendMessage(targetJid, {
                 text: "You currently have no special roles assigned.",
@@ -1230,13 +1307,13 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Successfully sent ping to ${arg1}.`,
+              `Successfully sent role notification check to ${arg1}.`,
             );
           } catch (e) {
             await sendBotReply(
               sock,
               from || "",
-              `Failed to send ping to ${arg1}.`,
+              `Failed to send role notification to ${arg1}.`,
             );
           }
           continue;
@@ -1255,7 +1332,12 @@ async function startBot(): Promise<void> {
             );
           } else {
             const formattedUsers = users
-              .map((j) => `+${j.split("@")[0]}`)
+              .map((j) => {
+                if (j.endsWith("@lid")) {
+                  return `${j.split("@")[0]} (LID)`;
+                }
+                return `+${j.split("@")[0]}`;
+              })
               .join("\n");
             await sendBotReply(
               sock,
@@ -1266,34 +1348,97 @@ async function startBot(): Promise<void> {
           continue;
         }
 
-        const numberMatch = arg2.trim().match(/^\+(\d{7,15})$/);
+        let targetJid = "";
+        const inputLabel = arg2.trim();
 
-        if (!numberMatch) {
-          await sendBotReply(
-            sock,
-            from || "",
-            "Error: Phone number must start with + followed by country code and number, and contain no spaces.\nFormat: +{country_code}{number}\nExample: +919902849280",
-          );
-          continue;
+        if (inputLabel.includes("@")) {
+          const normalized = normalizeJid(inputLabel);
+          if (normalized && (normalized.endsWith("@s.whatsapp.net") || normalized.endsWith("@lid"))) {
+            targetJid = normalized;
+          }
         }
 
-        const rawPhone = numberMatch[1];
-        let targetJid = `${rawPhone}@s.whatsapp.net`;
-        
-        try {
-          const waResult = await sock.onWhatsApp(rawPhone);
-          if (waResult && waResult.length > 0 && waResult[0].exists) {
-            targetJid = waResult[0].jid;
-          } else {
-             await sendBotReply(sock, from || "", `Warning: Number +${rawPhone} does not appear to be registered on WhatsApp. Cannot assign role.`);
-             continue;
+        if (!targetJid && /^\d{7,20}$/.test(inputLabel)) {
+          targetJid = `${inputLabel}@s.whatsapp.net`;
+        }
+
+        if (!targetJid) {
+          const numberMatch = inputLabel.match(/^\+(\d{7,15})$/);
+          if (!numberMatch) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Error: Target must be a JID/LID (e.g. 123@s.whatsapp.net, 456@lid) or a phone number starting with + (e.g. +919902849280).",
+            );
+            continue;
           }
-        } catch(err) {
-            console.error("onWhatsApp error:", err);
+          const rawPhone = numberMatch[1];
+          targetJid = `${rawPhone}@s.whatsapp.net`;
+
+          try {
+            const waResult = await sock.onWhatsApp(rawPhone);
+            if (waResult && waResult.length > 0 && waResult[0].exists) {
+              targetJid = waResult[0].jid;
+            } else {
+               await sendBotReply(sock, from || "", `Warning: Number +${rawPhone} does not appear to be registered on WhatsApp. Cannot assign role.`);
+               continue;
+            }
+          } catch(err) {
+              console.error("onWhatsApp error:", err);
+          }
         }
 
         const { addManagedRole, storeLidPhoneMapping } = await import("./storage/dk24Store");
-        const ok = await addManagedRole(targetJid, normalizedWork);
+        let resolvedPhoneJid: string | null = null;
+        let resolvedLid: string | null = null;
+
+        if (targetJid.endsWith("@lid")) {
+          resolvedLid = targetJid;
+          try {
+            const { resolvePhoneJidFromLid } = await import("./storage/dk24Store");
+            resolvedPhoneJid = await resolvePhoneJidFromLid(resolvedLid);
+          } catch (_) {}
+
+          if (!resolvedPhoneJid && from && from.endsWith("@g.us")) {
+            try {
+              const meta = await sock.groupMetadata(from);
+              const match = meta.participants.find((p: any) => {
+                const plid = p.lid ? (normalizeJid(p.lid) ?? "").toLowerCase() : "";
+                return plid === resolvedLid!.toLowerCase();
+              });
+              if (match?.id) {
+                resolvedPhoneJid = normalizeJid(match.id) || null;
+              }
+            } catch (_) {}
+          }
+        } else if (targetJid.endsWith("@s.whatsapp.net")) {
+          resolvedPhoneJid = targetJid;
+          if (from && from.endsWith("@g.us")) {
+            try {
+              const meta = await sock.groupMetadata(from);
+              const match = meta.participants.find((p: any) => {
+                const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
+                return pid === resolvedPhoneJid!.toLowerCase();
+              });
+              if (match?.lid) {
+                resolvedLid = normalizeJid(match.lid) || null;
+              }
+            } catch (_) {}
+          }
+        }
+
+        if (resolvedLid && resolvedPhoneJid) {
+          await storeLidPhoneMapping(resolvedLid, resolvedPhoneJid);
+          logStructured({
+            event: "lid_mapped_on_manage",
+            role: normalizedWork,
+            phoneHash: getJidHash(resolvedPhoneJid),
+            lidHash: getJidHash(resolvedLid),
+          });
+        }
+
+        const roleJid = resolvedPhoneJid || targetJid;
+        const ok = await addManagedRole(roleJid, normalizedWork);
 
         if (ok) {
           await sendBotReply(
@@ -1301,31 +1446,11 @@ async function startBot(): Promise<void> {
             from || "",
             `Successfully assigned role "${normalizedWork}" to ${arg2}.`,
           );
-
-          // Immediately try to find and store this person's LID from the current
-          // group so that when they send messages as @lid we can resolve them.
-          if (from && from.endsWith("@g.us")) {
-            try {
-              const meta = await sock.groupMetadata(from);
-              const normalizedTarget = targetJid.toLowerCase();
-              const match = meta.participants.find((p: any) => {
-                const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
-                return pid === normalizedTarget;
-              });
-              if (match?.lid) {
-                const normalizedLid = normalizeJid(match.lid);
-                if (normalizedLid && normalizedLid.endsWith("@lid")) {
-                  await storeLidPhoneMapping(normalizedLid, targetJid);
-                  logStructured({ event: "lid_mapped_on_manage", role: normalizedWork, phoneHash: getJidHash(targetJid), lidHash: getJidHash(normalizedLid) });
-                }
-              }
-            } catch (_e) { /* group metadata unavailable — skip */ }
-          }
         } else {
           await sendBotReply(
             sock,
             from || "",
-            "Failed to assign role. Ensure the database connection is healthy.",
+            "Failed to assign role. Ensure the database connection is healthy and the role is valid.",
           );
         }
         continue;
