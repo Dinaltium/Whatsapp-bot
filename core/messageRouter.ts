@@ -697,7 +697,7 @@ export async function handleMessageUpsert(
             await sendBotReply(
               sock,
               from || "",
-              "Usage: !addgroup <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: TEMP",
+              "Usage: !addgroup <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB",
             );
             continue;
           }
@@ -739,7 +739,7 @@ export async function handleMessageUpsert(
             await sendBotReply(
               sock,
               from || "",
-              "Usage: !addchat <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: TEMP",
+              "Usage: !addchat <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB",
             );
             continue;
           }
