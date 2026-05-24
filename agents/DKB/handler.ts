@@ -4,6 +4,7 @@ import {
   deleteMentor,
   updateMentorField,
   userHasPermission,
+  logAction,
 } from "../../storage/dk24Store";
 import {
   popUserMessage,
@@ -56,6 +57,10 @@ interface UserSession {
     flag: string;
     phoneNoCountryCode: string;
   };
+  pendingDelete?: {
+    mentorId: number;
+    name: string;
+  };
 }
 
 interface AgentResult {
@@ -74,6 +79,42 @@ export async function handleMessage(
 ): Promise<AgentResult> {
   const trimmed = (userPrompt || "").trim();
   const lowerPrompt = trimmed.toLowerCase();
+
+  // MULTI-TURN: Resolve pending delete confirmation
+  if (session.pendingDelete) {
+    popUserMessage(session, userPrompt);
+    const pending = session.pendingDelete;
+    const isYes = /^!?yes$/i.test(trimmed);
+    delete session.pendingDelete;
+
+    if (isYes) {
+      const ok = await deleteMentor(String(pending.mentorId));
+      if (ok) {
+        await logAction(
+          senderJid || "unknown",
+          "delete_mentor",
+          String(pending.mentorId),
+          pending.name,
+          JSON.stringify({ deleted: true }),
+        );
+      }
+      return {
+        reply: formatBotReply(
+          ok
+            ? `Successfully deleted Mentor ID: ${pending.mentorId} | Name: ${pending.name}.`
+            : `Failed to delete Mentor ID: ${pending.mentorId}.`,
+        ),
+        usedAI: false,
+      };
+    } else {
+      return {
+        reply: formatBotReply(
+          `Deletion of Mentor ID: ${pending.mentorId} | Name: ${pending.name} has been cancelled.`,
+        ),
+        usedAI: false,
+      };
+    }
+  }
 
   // MULTI-TURN: Resolve pending country code for !addmentor
   if (session.pendingMentor) {
@@ -452,18 +493,18 @@ export async function handleMessage(
     }
 
     const argsRaw = trimmed.slice(10).trim();
-    const editMatch = argsRaw.match(/^(\d+)\s+(-[a-zA-Z]+)\s+([\s\S]+)$/);
+    const editMatch = argsRaw.match(/^-id\s+(\d+)\s+(-[a-zA-Z]+)\s+([\s\S]+)$/i);
     if (!editMatch) {
       return {
         reply: formatBotReply(
           [
-            "Usage: !editmentor <id> -<flag> <value>",
+            "Usage: !editmentor -id <id> -<flag> <value>",
             "",
             "Examples:",
-            "  !editmentor 3 -n New Name",
-            "  !editmentor 3 -o New Organization",
-            "  !editmentor 3 -p +91 9902849280",
-            "  !editmentor 3 -l https://linkedin.com/in/rafan",
+            "  !editmentor -id 3 -n New Name",
+            "  !editmentor -id 3 -o New Organization",
+            "  !editmentor -id 3 -p +91 9902849280",
+            "  !editmentor -id 3 -l https://linkedin.com/in/rafan",
             "",
             "Flags: -n (name), -d (description), -o (org), -ex (expertise),",
             "       -l (linkedin), -i (instagram), -g (github), -e (email), -p (phone)",
@@ -506,6 +547,7 @@ export async function handleMessage(
         mentorId,
         flag,
         phoneResult.formatted || null,
+        senderJid,
       );
       return {
         reply: formatBotReply(
@@ -517,7 +559,7 @@ export async function handleMessage(
       };
     }
 
-    const ok = await updateMentorField(mentorId, flag, value || null);
+    const ok = await updateMentorField(mentorId, flag, value || null, senderJid);
     return {
       reply: formatBotReply(
         ok
@@ -543,20 +585,36 @@ export async function handleMessage(
       };
     }
 
-    const query = trimmed.slice(9).trim();
-    if (!query) {
+    const argsRaw = trimmed.slice(9).trim();
+    const delMatch = argsRaw.match(/^-id\s+(\d+)$/i);
+    if (!delMatch) {
       return {
-        reply: formatBotReply("Usage: !delmentor <id_or_name>"),
+        reply: formatBotReply(
+          "Usage: !delmentor -id <id_number>\nExample: !delmentor -id 4",
+        ),
         usedAI: false,
       };
     }
 
-    const ok = await deleteMentor(query);
+    const mentorId = parseInt(delMatch[1], 10);
+    const existingMentor = await getMentorById(mentorId);
+    if (!existingMentor) {
+      return {
+        reply: formatBotReply(
+          `No mentor found with ID ${mentorId}. Use !mentors to view the directory.`,
+        ),
+        usedAI: false,
+      };
+    }
+
+    session.pendingDelete = {
+      mentorId,
+      name: existingMentor.name,
+    };
+
     return {
       reply: formatBotReply(
-        ok
-          ? `Successfully deleted mentor "${query}".`
-          : `Mentor "${query}" not found or failed to delete.`,
+        `Are you sure you want to delete Mentor ID: ${mentorId} | Name: ${existingMentor.name}?\n(Enter !YES for confirmation)`,
       ),
       usedAI: false,
     };

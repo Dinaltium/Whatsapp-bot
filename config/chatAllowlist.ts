@@ -1,9 +1,8 @@
-import fs from "fs";
-import path from "path";
-
 interface ChatEntry {
+  id: number;
   jid: string;
   botNumber: number;
+  enabled: boolean;
 }
 
 let allowedChats: ChatEntry[] | null = null;
@@ -15,7 +14,7 @@ function normalizeChatJid(
   return jid;
 }
 
-function loadFromEnv(): ChatEntry[] {
+function loadFromEnv(): { jid: string; botNumber: number }[] {
   const env = process.env.ALLOWED_CHATS || "";
   return env
     .split(",")
@@ -32,84 +31,52 @@ function loadFromEnv(): ChatEntry[] {
     });
 }
 
-function loadFromFile(filePath: string): ChatEntry[] {
-  try {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(process.cwd(), filePath);
-    const raw = fs.readFileSync(absolutePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((entry) => {
-        if (typeof entry === "string") {
-          return { jid: normalizeChatJid(entry) || entry, botNumber: 0 };
-        }
-        return {
-          jid: normalizeChatJid(entry.jid) || entry.jid,
-          botNumber: entry.botNumber || 0,
-        };
-      });
-    }
-  } catch (error) {
-    // ignore file errors and use empty list
-  }
-
-  return [];
-}
-
 function ensureLoaded(): void {
   if (allowedChats !== null) return;
 
-  allowedChats = loadFromEnv();
-
-  const filePath = process.env.ALLOWED_CHATS_FILE || "allowed-chats.json";
-  if (filePath) {
-    const fromFile = loadFromFile(filePath);
-    allowedChats = allowedChats.concat(fromFile);
-  }
-
-  // deduplicate by normalized jid, keeping the last entry
-  const uniqueMap = new Map<string, ChatEntry>();
-  for (const entry of allowedChats) {
-    const normalized = normalizeChatJid(entry.jid) || entry.jid;
-    if (normalized.trim()) {
-      uniqueMap.set(normalized.trim(), {
-        jid: normalized,
-        botNumber: entry.botNumber,
-      });
-    }
-  }
-  allowedChats = Array.from(uniqueMap.values());
+  const envEntries = loadFromEnv();
+  allowedChats = envEntries.map((e, idx) => ({
+    id: 99000 + idx,
+    jid: e.jid,
+    botNumber: e.botNumber,
+    enabled: true,
+  }));
 }
 
 async function init(): Promise<void> {
   const envEntries = loadFromEnv();
-  const filePath = process.env.ALLOWED_CHATS_FILE || "allowed-chats.json";
-  const fileEntries = filePath ? loadFromFile(filePath) : [];
 
   let dbEntries: ChatEntry[] = [];
   try {
-    const { getAllowedChats } = await import("../storage/dk24Store");
-    const dbRows = await getAllowedChats();
-    dbEntries = dbRows.map((e) => ({ jid: e.jid, botNumber: e.bot_number }));
-  } catch (error) {
-    console.warn("⚠️ Failed to load allowed chats from Neon DB:", error);
-  }
+    const { getAllowedChats, addAllowedChat } = await import("../storage/dk24Store");
 
-  allowedChats = [...envEntries, ...fileEntries, ...dbEntries];
-
-  // deduplicate by normalized jid, keeping the last entry
-  const uniqueMap = new Map<string, ChatEntry>();
-  for (const entry of allowedChats) {
-    const normalized = normalizeChatJid(entry.jid) || entry.jid;
-    if (normalized.trim()) {
-      uniqueMap.set(normalized.trim(), {
-        jid: normalized,
-        botNumber: entry.botNumber,
-      });
+    // Sync any env entries that don't exist in DB yet
+    const currentDb = await getAllowedChats();
+    for (const envEnt of envEntries) {
+      const exists = currentDb.some((dbE) => dbE.jid === envEnt.jid);
+      if (!exists) {
+        await addAllowedChat(envEnt.jid, envEnt.botNumber);
+      }
     }
+
+    const dbRows = await getAllowedChats();
+    dbEntries = dbRows.map((e) => ({
+      id: e.id,
+      jid: e.jid,
+      botNumber: e.bot_number,
+      enabled: e.enabled,
+    }));
+  } catch (error) {
+    console.warn("⚠️ Failed to load allowed chats from Neon DB, using env fallback:", error);
+    dbEntries = envEntries.map((e, idx) => ({
+      id: 99000 + idx,
+      jid: e.jid,
+      botNumber: e.botNumber,
+      enabled: true,
+    }));
   }
-  allowedChats = Array.from(uniqueMap.values());
+
+  allowedChats = dbEntries;
 }
 
 function getChatBot(
@@ -137,35 +104,31 @@ function getChatBot(
     );
   });
 
-  return entry ? { botNumber: entry.botNumber } : null;
+  return entry && entry.enabled ? { botNumber: entry.botNumber } : null;
 }
 
 function isChatAllowed(jid: string | null | undefined): boolean {
   return getChatBot(jid) !== null;
 }
 
-function writeToFile(filePath: string, data: ChatEntry[]): boolean {
-  try {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(process.cwd(), filePath);
-    fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), "utf8");
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-function getStorageFile(): string {
-  const filePath = process.env.ALLOWED_CHATS_FILE || "allowed-chats.json";
-  return path.isAbsolute(filePath)
-    ? filePath
-    : path.join(process.cwd(), filePath);
-}
-
 function listChats(): ChatEntry[] {
   ensureLoaded();
-  return allowedChats!.map((c) => ({ jid: c.jid, botNumber: c.botNumber }));
+  return allowedChats!.map((c) => ({
+    id: c.id,
+    jid: c.jid,
+    botNumber: c.botNumber,
+    enabled: c.enabled,
+  }));
+}
+
+function getChatEntryById(id: number): ChatEntry | null {
+  ensureLoaded();
+  return allowedChats!.find((c) => c.id === id) || null;
+}
+
+function getChatEntryByJid(jid: string): ChatEntry | null {
+  ensureLoaded();
+  return allowedChats!.find((c) => c.jid === jid) || null;
 }
 
 async function addChat(
@@ -177,6 +140,18 @@ async function addChat(
   ensureLoaded();
 
   const normalized = normalizeChatJid(jid) || jid;
+
+  try {
+    const { addAllowedChat } = await import("../storage/dk24Store");
+    const ok = await addAllowedChat(normalized, botNumber);
+    if (ok) {
+      await init();
+      return true;
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist added chat ${normalized} to DB:`, error);
+  }
+
   const existing = allowedChats!.find((c) => {
     const normalizedEntry = normalizeChatJid(c.jid);
     return normalizedEntry === normalized || c.jid === jid;
@@ -184,50 +159,83 @@ async function addChat(
 
   if (existing) {
     existing.botNumber = botNumber;
+    existing.enabled = true;
   } else {
-    allowedChats!.push({ jid: normalized, botNumber });
+    allowedChats!.push({
+      id: 99000 + allowedChats!.length,
+      jid: normalized,
+      botNumber,
+      enabled: true,
+    });
   }
-
-  // 1. Local file write
-  const fileOk = writeToFile(getStorageFile(), allowedChats!);
-
-  // 2. DB write
-  try {
-    const { addAllowedChat } = await import("../storage/dk24Store");
-    await addAllowedChat(normalized, botNumber);
-  } catch (error) {
-    console.warn(`⚠️ Failed to persist added chat ${normalized} to DB:`, error);
-  }
-
-  return fileOk;
+  return true;
 }
 
-async function removeChat(jid: string | null | undefined): Promise<boolean> {
-  if (!jid) return false;
-
+async function removeChatById(id: number): Promise<boolean> {
   ensureLoaded();
 
-  const normalized = normalizeChatJid(jid) || jid;
-  const index = allowedChats!.findIndex((c) => {
-    const normalizedEntry = normalizeChatJid(c.jid);
-    return normalizedEntry === normalized || c.jid === jid;
-  });
+  const entry = allowedChats!.find((c) => c.id === id);
+  if (!entry) return false;
 
-  if (index === -1) return false;
-  allowedChats!.splice(index, 1);
-
-  // 1. Local file write
-  const fileOk = writeToFile(getStorageFile(), allowedChats!);
-
-  // 2. DB write
   try {
-    const { removeAllowedChat } = await import("../storage/dk24Store");
-    await removeAllowedChat(normalized);
+    const { removeAllowedChatById } = await import("../storage/dk24Store");
+    const ok = await removeAllowedChatById(id);
+    if (ok) {
+      await init();
+      return true;
+    }
   } catch (error) {
-    console.warn(`⚠️ Failed to persist removed chat ${normalized} from DB:`, error);
+    console.warn(`⚠️ Failed to persist removed chat ID ${id} from DB:`, error);
   }
 
-  return fileOk;
+  const index = allowedChats!.findIndex((c) => c.id === id);
+  if (index !== -1) {
+    allowedChats!.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+async function editChatBot(id: number, botNumber: number): Promise<boolean> {
+  ensureLoaded();
+
+  const entry = allowedChats!.find((c) => c.id === id);
+  if (!entry) return false;
+
+  try {
+    const { setChatBotNumber } = await import("../storage/dk24Store");
+    const ok = await setChatBotNumber(id, botNumber);
+    if (ok) {
+      await init();
+      return true;
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist edit chat bot ID ${id} to DB:`, error);
+  }
+
+  entry.botNumber = botNumber;
+  return true;
+}
+
+async function setChatEnabled(id: number, enabled: boolean): Promise<boolean> {
+  ensureLoaded();
+
+  const entry = allowedChats!.find((c) => c.id === id);
+  if (!entry) return false;
+
+  try {
+    const { setChatEnabled: dbSetEnabled } = await import("../storage/dk24Store");
+    const ok = await dbSetEnabled(id, enabled);
+    if (ok) {
+      await init();
+      return true;
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist enabled chat ID ${id} state to DB:`, error);
+  }
+
+  entry.enabled = enabled;
+  return true;
 }
 
 export default {
@@ -235,6 +243,10 @@ export default {
   getChatBot,
   isChatAllowed,
   listChats,
+  getChatEntryById,
+  getChatEntryByJid,
   addChat,
-  removeChat,
+  removeChatById,
+  editChatBot,
+  setChatEnabled,
 };

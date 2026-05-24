@@ -56,6 +56,26 @@ interface UserSession {
     flag: string;
     phoneNoCountryCode: string;
   };
+  pendingDeleteGroup?: {
+    id: number;
+    jid: string;
+    botNumber: number;
+  };
+  pendingDeleteChat?: {
+    id: number;
+    jid: string;
+    botNumber: number;
+  };
+  pendingEditGroup?: {
+    id: number;
+    jid: string;
+    botNumber: number;
+  };
+  pendingEditChat?: {
+    id: number;
+    jid: string;
+    botNumber: number;
+  };
 }
 
 const userAiSessions = new Map<string, UserSession>();
@@ -204,6 +224,8 @@ function shouldSkipMessage(
     : "";
   if (commandName === "removegroup") commandName = "rmgroup";
   if (commandName === "removechat") commandName = "rmchat";
+  if (commandName === "listgroup") commandName = "listgroups";
+  if (commandName === "listchat") commandName = "listchats";
 
   const isCommand = normalizedText.startsWith(COMMAND_PREFIX);
   const isAdmin = isAdminSender(msg, resolvedSenderId);
@@ -219,6 +241,12 @@ function shouldSkipMessage(
     "rmchat",
     "listchats",
     "changebot",
+    "editgroup",
+    "editchat",
+    "disablegroup",
+    "disablechat",
+    "enablegroup",
+    "enablechat",
     "neonping",
     "neonconnect",
     // NOTE: "manage" is NOT here — it has its own RBAC gate inside the handler
@@ -854,6 +882,159 @@ async function startBot(): Promise<void> {
 
       resetSessionIfExpired(session);
 
+      // ── INTERCEPT ALLOWLIST CONFIRMATIONS ────────────────────────────────
+      if (session.pendingDeleteGroup) {
+        const pending = session.pendingDeleteGroup;
+        delete session.pendingDeleteGroup;
+
+        const isYes = /^!?yes$/i.test(text!.trim());
+        if (isYes) {
+          const ok = await groupConfig.removeGroupById(pending.id);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "remove_group",
+              String(pending.id),
+              pending.jid,
+              JSON.stringify({ jid: pending.jid, botNumber: pending.botNumber })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Successfully removed Group ID: ${pending.id} | JID: ${pending.jid} from the allowlist.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to remove Group ID: ${pending.id}.`
+            );
+          }
+        } else {
+          await sendBotReply(
+            sock,
+            from || "",
+            `Removal of Group ID: ${pending.id} has been cancelled.`
+          );
+        }
+        continue;
+      }
+
+      if (session.pendingDeleteChat) {
+        const pending = session.pendingDeleteChat;
+        delete session.pendingDeleteChat;
+
+        const isYes = /^!?yes$/i.test(text!.trim());
+        if (isYes) {
+          const ok = await chatConfig.removeChatById(pending.id);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "remove_chat",
+              String(pending.id),
+              pending.jid,
+              JSON.stringify({ jid: pending.jid, botNumber: pending.botNumber })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Successfully removed Chat ID: ${pending.id} | JID: ${pending.jid} from the allowlist.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to remove Chat ID: ${pending.id}.`
+            );
+          }
+        } else {
+          await sendBotReply(
+            sock,
+            from || "",
+            `Removal of Chat ID: ${pending.id} has been cancelled.`
+          );
+        }
+        continue;
+      }
+
+      if (session.pendingEditGroup) {
+        const pending = session.pendingEditGroup;
+        delete session.pendingEditGroup;
+
+        const isYes = /^!?yes$/i.test(text!.trim());
+        if (isYes) {
+          const ok = await groupConfig.editGroupBot(pending.id, pending.botNumber);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "edit_group",
+              String(pending.id),
+              pending.jid,
+              JSON.stringify({ botNumber: pending.botNumber })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Changed Group ID: ${pending.id} to use Bot ${pending.botNumber}.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to change Bot for Group ID: ${pending.id}.`
+            );
+          }
+        } else {
+          await sendBotReply(
+            sock,
+            from || "",
+            `Change of bot for Group ID: ${pending.id} has been cancelled.`
+          );
+        }
+        continue;
+      }
+
+      if (session.pendingEditChat) {
+        const pending = session.pendingEditChat;
+        delete session.pendingEditChat;
+
+        const isYes = /^!?yes$/i.test(text!.trim());
+        if (isYes) {
+          const ok = await chatConfig.editChatBot(pending.id, pending.botNumber);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "edit_chat",
+              String(pending.id),
+              pending.jid,
+              JSON.stringify({ botNumber: pending.botNumber })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Changed Chat ID: ${pending.id} to use Bot ${pending.botNumber}.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to change Bot for Chat ID: ${pending.id}.`
+            );
+          }
+        } else {
+          await sendBotReply(
+            sock,
+            from || "",
+            `Change of bot for Chat ID: ${pending.id} has been cancelled.`
+          );
+        }
+        continue;
+      }
+
       // Determine bot number for this group/chat
       let botNumber = 0;
       if (from?.endsWith("@g.us")) {
@@ -904,8 +1085,8 @@ async function startBot(): Promise<void> {
             "• !next - View the next page of mentors from your active query",
             "• !page <number> - View a specific page of mentors from your active query",
             "• !addmentor -n <name> -o <org> [-d <desc>] [-ex <expertise>] [-l <linkedin>] [-i <instagram>] [-g <github>] [-e <email>] [-p <phone>] - Add a mentor (Authorized only)",
-            "• !editmentor <id> -<flag> <value> - Update a single field on a mentor (Authorized only)",
-            "• !delmentor <id_or_name> - Remove a mentor (Authorized only)",
+            "• !editmentor -id <id> -<flag> <value> - Update a single field on a mentor (Authorized only)",
+            "• !delmentor -id <id> - Remove a mentor (Authorized only)",
             "• !<question> - Chat directly with DKB (e.g. !What is a good way to host an AI meetup?)",
           ].join("\n");
         } else if (botNumber === 3) {
@@ -965,6 +1146,8 @@ async function startBot(): Promise<void> {
       let cmdName = (parts[0] || "").toLowerCase();
       if (cmdName === "removegroup") cmdName = "rmgroup";
       if (cmdName === "removechat") cmdName = "rmchat";
+      if (cmdName === "listgroup") cmdName = "listgroups";
+      if (cmdName === "listchat") cmdName = "listchats";
       const cmdArgs = parts.slice(1);
 
 
@@ -997,6 +1180,12 @@ async function startBot(): Promise<void> {
           "rmchat",
           "listchats",
           "changebot",
+          "editgroup",
+          "editchat",
+          "disablegroup",
+          "disablechat",
+          "enablegroup",
+          "enablechat",
           "neonping",
           "neonconnect",
         ].includes(cmdName)
@@ -1026,9 +1215,10 @@ async function startBot(): Promise<void> {
                   : entry.botNumber === 2
                     ? "DKB"
                     : entry.botNumber === 3
-                      ? "Sajige Bajil"
+                      ? "TEMP"
                       : "PARAG";
-              return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
+              const statusLabel = entry.enabled ? "Enabled" : "Disabled";
+              return `${entry.id}. ${entry.jid} | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
             });
             await sendBotReply(
               sock,
@@ -1037,61 +1227,6 @@ async function startBot(): Promise<void> {
             );
           }
           continue;
-        }
-
-        if (cmdName === "addgroup" || cmdName === "rmgroup") {
-          let target = cmdArgs[0];
-          const botNumber = cmdArgs[1] ? parseInt(cmdArgs[1], 10) : 0;
-
-          if (!target) {
-            await sendBotReply(
-              sock,
-              from || "",
-              `Usage: !${cmdName} <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: Sajige Bajil`,
-            );
-            continue;
-          }
-
-          target = normalizeJid(target) as string;
-
-          if (cmdName === "addgroup") {
-            const ok = await groupConfig.addGroup(
-              target,
-              isNaN(botNumber) ? 0 : botNumber,
-            );
-            if (ok) {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Added ${target} to group allowlist (Bot ${isNaN(botNumber) ? 0 : botNumber}).`,
-              );
-            } else {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Failed to add ${target}. Ensure it's a valid group JID and writable file is configured.`,
-              );
-            }
-            continue;
-          }
-
-          if (cmdName === "rmgroup") {
-            const ok = await groupConfig.removeGroup(target);
-            if (ok) {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Removed ${target} from group allowlist.`,
-              );
-            } else {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Failed to remove ${target}. It may not be present.`,
-              );
-            }
-            continue;
-          }
         }
 
         if (cmdName === "listchats") {
@@ -1110,9 +1245,10 @@ async function startBot(): Promise<void> {
                   : entry.botNumber === 2
                     ? "DKB"
                     : entry.botNumber === 3
-                      ? "Sajige Bajil"
+                      ? "TEMP"
                       : "PARAG";
-              return `${entry.jid} (Bot ${entry.botNumber} - ${botLabel})`;
+              const statusLabel = entry.enabled ? "Enabled" : "Disabled";
+              return `${entry.id}. ${entry.jid} | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
             });
             await sendBotReply(
               sock,
@@ -1123,7 +1259,7 @@ async function startBot(): Promise<void> {
           continue;
         }
 
-        if (cmdName === "addchat" || cmdName === "rmchat") {
+        if (cmdName === "addgroup") {
           let target = cmdArgs[0];
           const botNumber = cmdArgs[1] ? parseInt(cmdArgs[1], 10) : 0;
 
@@ -1131,117 +1267,470 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !${cmdName} <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: Sajige Bajil`,
+              "Usage: !addgroup <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: TEMP",
             );
             continue;
           }
 
           target = normalizeJid(target) as string;
-
-          if (cmdName === "addchat") {
-            const ok = await chatConfig.addChat(
+          const ok = await groupConfig.addGroup(target, isNaN(botNumber) ? 0 : botNumber);
+          if (ok) {
+            const groupEntry = groupConfig.getGroupEntryByJid(target);
+            const idLabel = groupEntry ? ` (ID: ${groupEntry.id})` : "";
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "add_group",
+              groupEntry ? String(groupEntry.id) : null,
               target,
-              isNaN(botNumber) ? 0 : botNumber,
+              JSON.stringify({ botNumber: isNaN(botNumber) ? 0 : botNumber })
             );
-            if (ok) {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Added ${target} to chat allowlist (Bot ${isNaN(botNumber) ? 0 : botNumber}).`,
-              );
-            } else {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Failed to add ${target}. Ensure it's a valid JID and writable file is configured.`,
-              );
-            }
-            continue;
-          }
-
-          if (cmdName === "rmchat") {
-            const ok = await chatConfig.removeChat(target);
-            if (ok) {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Removed ${target} from chat allowlist.`,
-              );
-            } else {
-              await sendBotReply(
-                sock,
-                from || "",
-                `Failed to remove ${target}. It may not be present.`,
-              );
-            }
-            continue;
-          }
-        }
-
-        if (cmdName === "changebot") {
-          let target = cmdArgs[0];
-          const botNumber = cmdArgs[1] ? parseInt(cmdArgs[1], 10) : NaN;
-
-          if (!target || isNaN(botNumber)) {
             await sendBotReply(
               sock,
               from || "",
-              `Usage: !changebot <jid> <bot-number>\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: TEMP`,
+              `Added ${target} to group allowlist${idLabel} (Bot ${isNaN(botNumber) ? 0 : botNumber}).`,
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to add ${target}. Ensure it's a valid group JID.`,
+            );
+          }
+          continue;
+        }
+
+        if (cmdName === "addchat") {
+          let target = cmdArgs[0];
+          const botNumber = cmdArgs[1] ? parseInt(cmdArgs[1], 10) : 0;
+
+          if (!target) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !addchat <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB | Bot 3: TEMP",
             );
             continue;
           }
 
           target = normalizeJid(target) as string;
-
-          if (target.endsWith("@g.us")) {
-            const hasExisting = groupConfig.isGroupAllowed(target);
-            if (hasExisting) {
-              const ok = await groupConfig.addGroup(target, botNumber);
-              if (ok) {
-                await sendBotReply(
-                  sock,
-                  from || "",
-                  `Changed ${target} to use Bot ${botNumber} (Group).`,
-                );
-              } else {
-                await sendBotReply(
-                  sock,
-                  from || "",
-                  `Failed to change bot for ${target}.`,
-                );
-              }
-            } else {
-              await sendBotReply(
-                sock,
-                from || "",
-                `${target} is not in the group allowlist. Use !addgroup first.`,
-              );
-            }
+          const ok = await chatConfig.addChat(target, isNaN(botNumber) ? 0 : botNumber);
+          if (ok) {
+            const chatEntry = chatConfig.getChatEntryByJid(target);
+            const idLabel = chatEntry ? ` (ID: ${chatEntry.id})` : "";
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "add_chat",
+              chatEntry ? String(chatEntry.id) : null,
+              target,
+              JSON.stringify({ botNumber: isNaN(botNumber) ? 0 : botNumber })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Added ${target} to chat allowlist${idLabel} (Bot ${isNaN(botNumber) ? 0 : botNumber}).`,
+            );
           } else {
-            const hasExisting = chatConfig.isChatAllowed(target);
-            if (hasExisting) {
-              const ok = await chatConfig.addChat(target, botNumber);
-              if (ok) {
-                await sendBotReply(
-                  sock,
-                  from || "",
-                  `Changed ${target} to use Bot ${botNumber} (Chat).`,
-                );
-              } else {
-                await sendBotReply(
-                  sock,
-                  from || "",
-                  `Failed to change bot for ${target}.`,
-                );
-              }
-            } else {
-              await sendBotReply(
-                sock,
-                from || "",
-                `${target} is not in the chat allowlist. Use !addchat first.`,
-              );
-            }
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to add ${target}. Ensure it's a valid chat JID.`,
+            );
           }
+          continue;
+        }
+
+        if (cmdName === "rmgroup") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !rmgroup -id <id_number>\nExample: !rmgroup -id 4",
+            );
+            continue;
+          }
+
+          const groupId = parseInt(match[1], 10);
+          const groupEntry = groupConfig.getGroupEntryById(groupId);
+          if (!groupEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No group found in the allowlist with ID ${groupId}.`,
+            );
+            continue;
+          }
+
+          session.pendingDeleteGroup = {
+            id: groupId,
+            jid: groupEntry.jid,
+            botNumber: groupEntry.botNumber,
+          };
+
+          const botLabel = groupEntry.botNumber === 1
+            ? "ECB"
+            : groupEntry.botNumber === 2
+              ? "DKB"
+              : groupEntry.botNumber === 3
+                ? "TEMP"
+                : "PARAG";
+
+          await sendBotReply(
+            sock,
+            from || "",
+            `Are you sure you want to remove Group ID: ${groupId} | JID: ${groupEntry.jid} | Bot: ${groupEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
+          );
+          continue;
+        }
+
+        if (cmdName === "rmchat") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !rmchat -id <id_number>\nExample: !rmchat -id 4",
+            );
+            continue;
+          }
+
+          const chatId = parseInt(match[1], 10);
+          const chatEntry = chatConfig.getChatEntryById(chatId);
+          if (!chatEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No chat found in the allowlist with ID ${chatId}.`,
+            );
+            continue;
+          }
+
+          session.pendingDeleteChat = {
+            id: chatId,
+            jid: chatEntry.jid,
+            botNumber: chatEntry.botNumber,
+          };
+
+          const botLabel = chatEntry.botNumber === 1
+            ? "ECB"
+            : chatEntry.botNumber === 2
+              ? "DKB"
+              : chatEntry.botNumber === 3
+                ? "TEMP"
+                : "PARAG";
+
+          await sendBotReply(
+            sock,
+            from || "",
+            `Are you sure you want to remove Chat ID: ${chatId} | JID: ${chatEntry.jid} | Bot: ${chatEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
+          );
+          continue;
+        }
+
+        if (cmdName === "editgroup") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)\s+-b\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !editgroup -id <id_number> -b <bot_number>\nExample: !editgroup -id 4 -b 2",
+            );
+            continue;
+          }
+
+          const groupId = parseInt(match[1], 10);
+          const newBotNumber = parseInt(match[2], 10);
+
+          const groupEntry = groupConfig.getGroupEntryById(groupId);
+          if (!groupEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No group found in the allowlist with ID ${groupId}.`,
+            );
+            continue;
+          }
+
+          if (groupEntry.botNumber === newBotNumber) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Group is already using bot ${newBotNumber}.`,
+            );
+            continue;
+          }
+
+          session.pendingEditGroup = {
+            id: groupId,
+            jid: groupEntry.jid,
+            botNumber: newBotNumber,
+          };
+
+          const oldBotLabel = groupEntry.botNumber === 1 ? "ECB" : groupEntry.botNumber === 2 ? "DKB" : groupEntry.botNumber === 3 ? "TEMP" : "PARAG";
+          const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : newBotNumber === 3 ? "TEMP" : "PARAG";
+
+          await sendBotReply(
+            sock,
+            from || "",
+            `Are you sure you want to change Group ID: ${groupId} | JID: ${groupEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${groupEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
+          );
+          continue;
+        }
+
+        if (cmdName === "editchat") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)\s+-b\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !editchat -id <id_number> -b <bot_number>\nExample: !editchat -id 4 -b 2",
+            );
+            continue;
+          }
+
+          const chatId = parseInt(match[1], 10);
+          const newBotNumber = parseInt(match[2], 10);
+
+          const chatEntry = chatConfig.getChatEntryById(chatId);
+          if (!chatEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No chat found in the allowlist with ID ${chatId}.`,
+            );
+            continue;
+          }
+
+          if (chatEntry.botNumber === newBotNumber) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Chat is already using bot ${newBotNumber}.`,
+            );
+            continue;
+          }
+
+          session.pendingEditChat = {
+            id: chatId,
+            jid: chatEntry.jid,
+            botNumber: newBotNumber,
+          };
+
+          const oldBotLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : chatEntry.botNumber === 3 ? "TEMP" : "PARAG";
+          const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : newBotNumber === 3 ? "TEMP" : "PARAG";
+
+          await sendBotReply(
+            sock,
+            from || "",
+            `Are you sure you want to change Chat ID: ${chatId} | JID: ${chatEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${chatEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
+          );
+          continue;
+        }
+
+        if (cmdName === "disablegroup") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !disablegroup -id <id_number>\nExample: !disablegroup -id 4",
+            );
+            continue;
+          }
+
+          const groupId = parseInt(match[1], 10);
+          const groupEntry = groupConfig.getGroupEntryById(groupId);
+          if (!groupEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No group found in the allowlist with ID ${groupId}.`,
+            );
+            continue;
+          }
+
+          const ok = await groupConfig.setGroupEnabled(groupId, false);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "disable_group",
+              String(groupId),
+              groupEntry.jid,
+              JSON.stringify({ enabled: false })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Disabled Group ID: ${groupId} | JID: ${groupEntry.jid}. The bot will not respond in this group.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to disable Group ID: ${groupId}.`
+            );
+          }
+          continue;
+        }
+
+        if (cmdName === "disablechat") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !disablechat -id <id_number>\nExample: !disablechat -id 4",
+            );
+            continue;
+          }
+
+          const chatId = parseInt(match[1], 10);
+          const chatEntry = chatConfig.getChatEntryById(chatId);
+          if (!chatEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No chat found in the allowlist with ID ${chatId}.`,
+            );
+            continue;
+          }
+
+          const ok = await chatConfig.setChatEnabled(chatId, false);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "disable_chat",
+              String(chatId),
+              chatEntry.jid,
+              JSON.stringify({ enabled: false })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Disabled Chat ID: ${chatId} | JID: ${chatEntry.jid}. The bot will not respond in this chat.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to disable Chat ID: ${chatId}.`
+            );
+          }
+          continue;
+        }
+
+        if (cmdName === "enablegroup") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !enablegroup -id <id_number>\nExample: !enablegroup -id 4",
+            );
+            continue;
+          }
+
+          const groupId = parseInt(match[1], 10);
+          const groupEntry = groupConfig.getGroupEntryById(groupId);
+          if (!groupEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No group found in the allowlist with ID ${groupId}.`,
+            );
+            continue;
+          }
+
+          const ok = await groupConfig.setGroupEnabled(groupId, true);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "enable_group",
+              String(groupId),
+              groupEntry.jid,
+              JSON.stringify({ enabled: true })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Enabled Group ID: ${groupId} | JID: ${groupEntry.jid}. The bot is now active in this group.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to enable Group ID: ${groupId}.`
+            );
+          }
+          continue;
+        }
+
+        if (cmdName === "enablechat") {
+          const rawArgs = cmdArgs.join(" ").trim();
+          const match = rawArgs.match(/^-id\s+(\d+)$/i);
+          if (!match) {
+            await sendBotReply(
+              sock,
+              from || "",
+              "Usage: !enablechat -id <id_number>\nExample: !enablechat -id 4",
+            );
+            continue;
+          }
+
+          const chatId = parseInt(match[1], 10);
+          const chatEntry = chatConfig.getChatEntryById(chatId);
+          if (!chatEntry) {
+            await sendBotReply(
+              sock,
+              from || "",
+              `No chat found in the allowlist with ID ${chatId}.`,
+            );
+            continue;
+          }
+
+          const ok = await chatConfig.setChatEnabled(chatId, true);
+          if (ok) {
+            const { logAction } = await import("./storage/dk24Store");
+            await logAction(
+              senderId || "unknown",
+              "enable_chat",
+              String(chatId),
+              chatEntry.jid,
+              JSON.stringify({ enabled: true })
+            );
+            await sendBotReply(
+              sock,
+              from || "",
+              `Enabled Chat ID: ${chatId} | JID: ${chatEntry.jid}. The bot is now active in this chat.`
+            );
+          } else {
+            await sendBotReply(
+              sock,
+              from || "",
+              `Failed to enable Chat ID: ${chatId}.`
+            );
+          }
+          continue;
+        }
+
+        if (cmdName === "changebot") {
+          await sendBotReply(
+            sock,
+            from || "",
+            "The !changebot command has been deprecated. Please use !editgroup or !editchat instead.\nExample: !editgroup -id 4 -b 2",
+          );
           continue;
         }
 

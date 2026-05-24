@@ -1,0 +1,150 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:68e21a24-749e-473d-82d2-8356d2db1b74",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-05-24T09:15:00Z",
+    "tools": [
+      {
+        "vendor": "Antigravity",
+        "name": "SBOM Generator",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "parag-whatsapp-bot",
+      "version": "1.0.0",
+      "description": "TypeScript-based WhatsApp bot coordinator with Groq AI integration, Neon PostgreSQL state store, and admin RBAC allowlists.",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "@whiskeysockets/baileys",
+      "version": "7.0.0-rc11",
+      "description": "WhatsApp Web API",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40whiskeysockets/baileys@7.0.0-rc11"
+    },
+    {
+      "type": "library",
+      "name": "dotenv",
+      "version": "17.4.2",
+      "description": "Loads environment variables from .env file",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "purl": "pkg:npm/dotenv@17.4.2"
+    },
+    {
+      "type": "library",
+      "name": "groq-sdk",
+      "version": "0.5.0",
+      "description": "Groq Cloud API SDK",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/groq-sdk@0.5.0"
+    },
+    {
+      "type": "library",
+      "name": "jsonwebtoken",
+      "version": "9.0.2",
+      "description": "JSON Web Token implementation",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/jsonwebtoken@9.0.2"
+    },
+    {
+      "type": "library",
+      "name": "pg",
+      "version": "8.16.3",
+      "description": "PostgreSQL client for Node.js",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/pg@8.16.3"
+    },
+    {
+      "type": "library",
+      "name": "pino",
+      "version": "10.3.1",
+      "description": "Super fast, all digital, Node.js logger",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/pino@10.3.1"
+    },
+    {
+      "type": "library",
+      "name": "puppeteer",
+      "version": "24.43.1",
+      "description": "Headless Chrome Node.js API",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:npm/puppeteer@24.43.1"
+    },
+    {
+      "type": "library",
+      "name": "qrcode-terminal",
+      "version": "0.12.0",
+      "description": "QRCodes in the terminal",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:npm/qrcode-terminal@0.12.0"
+    }
+  ]
+}

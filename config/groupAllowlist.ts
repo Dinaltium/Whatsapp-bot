@@ -1,14 +1,13 @@
-import fs from "fs";
-import path from "path";
-
 interface GroupEntry {
+  id: number;
   jid: string;
   botNumber: number;
+  enabled: boolean;
 }
 
 let allowedGroups: GroupEntry[] | null = null;
 
-function loadFromEnv(): GroupEntry[] {
+function loadFromEnv(): { jid: string; botNumber: number }[] {
   const env = process.env.ALLOWED_GROUPS || "";
   return env
     .split(",")
@@ -22,73 +21,52 @@ function loadFromEnv(): GroupEntry[] {
     });
 }
 
-function loadFromFile(filePath: string): GroupEntry[] {
-  try {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(process.cwd(), filePath);
-    const raw = fs.readFileSync(absolutePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((entry) => {
-        if (typeof entry === "string") {
-          return { jid: entry, botNumber: 0 };
-        }
-        return { jid: entry.jid, botNumber: entry.botNumber || 0 };
-      });
-    }
-  } catch (error) {
-    // ignore file errors and use empty list
-  }
-
-  return [];
-}
-
 function ensureLoaded(): void {
   if (allowedGroups !== null) return;
 
-  allowedGroups = loadFromEnv();
-
-  const filePath = process.env.ALLOWED_GROUPS_FILE || "allowed-groups.json";
-  if (filePath) {
-    const fromFile = loadFromFile(filePath);
-    allowedGroups = allowedGroups.concat(fromFile);
-  }
-
-  // deduplicate by jid, keeping the last entry
-  const uniqueMap = new Map<string, GroupEntry>();
-  for (const entry of allowedGroups) {
-    if (entry.jid.trim()) {
-      uniqueMap.set(entry.jid.trim(), entry);
-    }
-  }
-  allowedGroups = Array.from(uniqueMap.values());
+  const envEntries = loadFromEnv();
+  allowedGroups = envEntries.map((e, idx) => ({
+    id: 99000 + idx,
+    jid: e.jid,
+    botNumber: e.botNumber,
+    enabled: true,
+  }));
 }
 
 async function init(): Promise<void> {
   const envEntries = loadFromEnv();
-  const filePath = process.env.ALLOWED_GROUPS_FILE || "allowed-groups.json";
-  const fileEntries = filePath ? loadFromFile(filePath) : [];
 
   let dbEntries: GroupEntry[] = [];
   try {
-    const { getAllowedGroups } = await import("../storage/dk24Store");
-    const dbRows = await getAllowedGroups();
-    dbEntries = dbRows.map((e) => ({ jid: e.jid, botNumber: e.bot_number }));
-  } catch (error) {
-    console.warn("⚠️ Failed to load allowed groups from Neon DB:", error);
-  }
+    const { getAllowedGroups, addAllowedGroup } = await import("../storage/dk24Store");
 
-  allowedGroups = [...envEntries, ...fileEntries, ...dbEntries];
-
-  // deduplicate by jid, keeping the last entry
-  const uniqueMap = new Map<string, GroupEntry>();
-  for (const entry of allowedGroups) {
-    if (entry.jid.trim()) {
-      uniqueMap.set(entry.jid.trim(), entry);
+    // Sync any env entries that don't exist in DB yet
+    const currentDb = await getAllowedGroups();
+    for (const envEnt of envEntries) {
+      const exists = currentDb.some((dbE) => dbE.jid === envEnt.jid);
+      if (!exists) {
+        await addAllowedGroup(envEnt.jid, envEnt.botNumber);
+      }
     }
+
+    const dbRows = await getAllowedGroups();
+    dbEntries = dbRows.map((e) => ({
+      id: e.id,
+      jid: e.jid,
+      botNumber: e.bot_number,
+      enabled: e.enabled,
+    }));
+  } catch (error) {
+    console.warn("⚠️ Failed to load allowed groups from Neon DB, using env fallback:", error);
+    dbEntries = envEntries.map((e, idx) => ({
+      id: 99000 + idx,
+      jid: e.jid,
+      botNumber: e.botNumber,
+      enabled: true,
+    }));
   }
-  allowedGroups = Array.from(uniqueMap.values());
+
+  allowedGroups = dbEntries;
 }
 
 function getGroupBot(
@@ -101,35 +79,31 @@ function getGroupBot(
   if (allowedGroups!.length === 0) return null;
 
   const entry = allowedGroups!.find((g) => g.jid === jid);
-  return entry ? { botNumber: entry.botNumber } : null;
+  return entry && entry.enabled ? { botNumber: entry.botNumber } : null;
 }
 
 function isGroupAllowed(jid: string | null | undefined): boolean {
   return getGroupBot(jid) !== null;
 }
 
-function writeToFile(filePath: string, data: GroupEntry[]): boolean {
-  try {
-    const absolutePath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(process.cwd(), filePath);
-    fs.writeFileSync(absolutePath, JSON.stringify(data, null, 2), "utf8");
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-function getStorageFile(): string {
-  const filePath = process.env.ALLOWED_GROUPS_FILE || "allowed-groups.json";
-  return path.isAbsolute(filePath)
-    ? filePath
-    : path.join(process.cwd(), filePath);
-}
-
 function listGroups(): GroupEntry[] {
   ensureLoaded();
-  return allowedGroups!.map((g) => ({ jid: g.jid, botNumber: g.botNumber }));
+  return allowedGroups!.map((g) => ({
+    id: g.id,
+    jid: g.jid,
+    botNumber: g.botNumber,
+    enabled: g.enabled,
+  }));
+}
+
+function getGroupEntryById(id: number): GroupEntry | null {
+  ensureLoaded();
+  return allowedGroups!.find((g) => g.id === id) || null;
+}
+
+function getGroupEntryByJid(jid: string): GroupEntry | null {
+  ensureLoaded();
+  return allowedGroups!.find((g) => g.jid === jid) || null;
 }
 
 async function addGroup(
@@ -140,48 +114,97 @@ async function addGroup(
 
   ensureLoaded();
 
-  const existing = allowedGroups!.find((g) => g.jid === jid);
-  if (existing) {
-    existing.botNumber = botNumber;
-  } else {
-    allowedGroups!.push({ jid, botNumber });
-  }
-
-  // 1. Local file write
-  const fileOk = writeToFile(getStorageFile(), allowedGroups!);
-
-  // 2. DB write
   try {
     const { addAllowedGroup } = await import("../storage/dk24Store");
-    await addAllowedGroup(jid, botNumber);
+    const ok = await addAllowedGroup(jid, botNumber);
+    if (ok) {
+      await init();
+      return true;
+    }
   } catch (error) {
     console.warn(`⚠️ Failed to persist added group ${jid} to DB:`, error);
   }
 
-  return fileOk;
+  const existing = allowedGroups!.find((g) => g.jid === jid);
+  if (existing) {
+    existing.botNumber = botNumber;
+    existing.enabled = true;
+  } else {
+    allowedGroups!.push({
+      id: 99000 + allowedGroups!.length,
+      jid,
+      botNumber,
+      enabled: true,
+    });
+  }
+  return true;
 }
 
-async function removeGroup(jid: string | null | undefined): Promise<boolean> {
-  if (!jid || !jid.endsWith("@g.us")) return false;
-
+async function removeGroupById(id: number): Promise<boolean> {
   ensureLoaded();
 
-  const index = allowedGroups!.findIndex((g) => g.jid === jid);
-  if (index === -1) return false;
-  allowedGroups!.splice(index, 1);
+  const entry = allowedGroups!.find((g) => g.id === id);
+  if (!entry) return false;
 
-  // 1. Local file write
-  const fileOk = writeToFile(getStorageFile(), allowedGroups!);
-
-  // 2. DB write
   try {
-    const { removeAllowedGroup } = await import("../storage/dk24Store");
-    await removeAllowedGroup(jid);
+    const { removeAllowedGroupById } = await import("../storage/dk24Store");
+    const ok = await removeAllowedGroupById(id);
+    if (ok) {
+      await init();
+      return true;
+    }
   } catch (error) {
-    console.warn(`⚠️ Failed to persist removed group ${jid} from DB:`, error);
+    console.warn(`⚠️ Failed to persist removed group ID ${id} from DB:`, error);
   }
 
-  return fileOk;
+  const index = allowedGroups!.findIndex((g) => g.id === id);
+  if (index !== -1) {
+    allowedGroups!.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+async function editGroupBot(id: number, botNumber: number): Promise<boolean> {
+  ensureLoaded();
+
+  const entry = allowedGroups!.find((g) => g.id === id);
+  if (!entry) return false;
+
+  try {
+    const { setGroupBotNumber } = await import("../storage/dk24Store");
+    const ok = await setGroupBotNumber(id, botNumber);
+    if (ok) {
+      await init();
+      return true;
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist edit group bot ID ${id} to DB:`, error);
+  }
+
+  entry.botNumber = botNumber;
+  return true;
+}
+
+async function setGroupEnabled(id: number, enabled: boolean): Promise<boolean> {
+  ensureLoaded();
+
+  const entry = allowedGroups!.find((g) => g.id === id);
+  if (!entry) return false;
+
+  try {
+    const { setGroupEnabled: dbSetEnabled } = await import("../storage/dk24Store");
+    const ok = await dbSetEnabled(id, enabled);
+    if (ok) {
+      await init();
+      return true;
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to persist enabled group ID ${id} state to DB:`, error);
+  }
+
+  entry.enabled = enabled;
+  return true;
 }
 
 export default {
@@ -189,6 +212,10 @@ export default {
   getGroupBot,
   isGroupAllowed,
   listGroups,
+  getGroupEntryById,
+  getGroupEntryByJid,
   addGroup,
-  removeGroup,
+  removeGroupById,
+  editGroupBot,
+  setGroupEnabled,
 };
