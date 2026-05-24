@@ -48,7 +48,7 @@ async function init(): Promise<void> {
 
   let dbEntries: ChatEntry[] = [];
   try {
-    const { getAllowedChats, addAllowedChat } = await import("../storage/dk24Store");
+    const { getAllowedChats, addAllowedChat } = await import("../storage/core/allowlistRepository");
 
     // Sync any env entries that don't exist in DB yet
     const currentDb = await getAllowedChats();
@@ -142,7 +142,7 @@ async function addChat(
   const normalized = normalizeChatJid(jid) || jid;
 
   try {
-    const { addAllowedChat } = await import("../storage/dk24Store");
+    const { addAllowedChat } = await import("../storage/core/allowlistRepository");
     const ok = await addAllowedChat(normalized, botNumber);
     if (ok) {
       await init();
@@ -178,7 +178,7 @@ async function removeChatById(id: number): Promise<boolean> {
   if (!entry) return false;
 
   try {
-    const { removeAllowedChatById } = await import("../storage/dk24Store");
+    const { removeAllowedChatById } = await import("../storage/core/allowlistRepository");
     const ok = await removeAllowedChatById(id);
     if (ok) {
       await init();
@@ -203,7 +203,7 @@ async function editChatBot(id: number, botNumber: number): Promise<boolean> {
   if (!entry) return false;
 
   try {
-    const { setChatBotNumber } = await import("../storage/dk24Store");
+    const { setChatBotNumber } = await import("../storage/core/allowlistRepository");
     const ok = await setChatBotNumber(id, botNumber);
     if (ok) {
       await init();
@@ -224,7 +224,7 @@ async function setChatEnabled(id: number, enabled: boolean): Promise<boolean> {
   if (!entry) return false;
 
   try {
-    const { setChatEnabled: dbSetEnabled } = await import("../storage/dk24Store");
+    const { setChatEnabled: dbSetEnabled } = await import("../storage/core/allowlistRepository");
     const ok = await dbSetEnabled(id, enabled);
     if (ok) {
       await init();
