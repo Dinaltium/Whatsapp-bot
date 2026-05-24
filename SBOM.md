@@ -1,6 +1,6 @@
-# 📦 Software Bill of Materials (SBOM)
+# Software Bill of Materials (SBOM)
 
-This document contains a comprehensive breakdown of all software dependencies, licensing terms, and purposes for the **PARAG & DKB WhatsApp Bot Coordinator**.
+This document contains a comprehensive breakdown of all software dependencies, licensing terms, and purposes for the WhatsApp Bot Coordinator.
 
 - **Format:** SPDX / CycloneDX JSON Compatible
 - **Generated At:** 2026-05-24T09:15:00Z
@@ -8,7 +8,7 @@ This document contains a comprehensive breakdown of all software dependencies, l
 
 ---
 
-## 💎 Primary Application Metadata
+## Application Metadata
 
 - **Component Name:** `parag-whatsapp-bot`
 - **Version:** `1.0.0`
@@ -17,14 +17,14 @@ This document contains a comprehensive breakdown of all software dependencies, l
 
 ---
 
-## 📦 Runtime Dependencies
+## Runtime Dependencies
 
 These libraries are required for the execution of the bot in development and production environments.
 
 | Name | Version | License | Purpose / Description |
 | :--- | :--- | :--- | :--- |
 | **`@whiskeysockets/baileys`** | `^7.0.0-rc11` | MIT | WhatsApp Web socket engine supporting Baileys LID architecture. |
-| **`dotenv`** | `^17.4.2` | BSD-2-Clause | Safe environment variables injector from `.env` file. |
+| **`dotenv`** | `^17.4.2` | BSD-2-Clause | Environment variables injector from `.env` file. |
 | **`groq-sdk`** | `^0.5.0` | MIT | Developer SDK for Groq Cloud completions engines. |
 | **`jsonwebtoken`** | `^9.0.2` | MIT | Secure JWT packaging for auth payloads stored in Neon DB. |
 | **`pg`** | `^8.16.3` | MIT | PostgreSQL client and connection pooling wrapper. |
@@ -34,13 +34,13 @@ These libraries are required for the execution of the bot in development and pro
 
 ---
 
-## 🛠️ Development Dependencies
+## Development Dependencies
 
 These utilities are required purely for building, type-checking, and transpiling the application during CI/CD and deployment pipelines.
 
 | Name | Version | License | Purpose / Description |
 | :--- | :--- | :--- | :--- |
-| **`typescript`** | `^5.3.3` | Apache-2.0 | Safe, strongly typed code transpiler to target JavaScript. |
+| **`typescript`** | `^5.3.3` | Apache-2.0 | Strongly typed code transpiler to target JavaScript. |
 | **`nodemon`** | `^3.1.14` | MIT | Hot-reloading watcher for local development cycles. |
 | **`tsx`** | `^4.7.0` | MIT | Direct TS execution layer for scripting test environments. |
 | **`@types/node`** | `^20.19.41` | MIT | Node.js typings definitions. |
@@ -50,8 +50,8 @@ These utilities are required purely for building, type-checking, and transpiling
 
 ---
 
-## 🛡️ Security & Compliance Hardening
+## Security & Compliance Policies
 
 1. **Licensing Compliance:** No copyleft (e.g. GPL/AGPL) licenses are used inside runtime dependencies, ensuring high structural safety.
 2. **PostgreSQL Security:** `pg` connectivity employs active SSL enforcement when interfacing with the Neon Cloud database.
-3. **EPHEMERAL Integrity:** Local JSON writes are completely omitted; all allowed group/chat lists and toggle states persist securely in the database schema.
+3. **Storage Integrity:** Local JSON writes are completely omitted; all allowed group/chat lists and toggle states persist securely in the database schema.
