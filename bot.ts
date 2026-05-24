@@ -81,6 +81,7 @@ interface UserSession {
 const userAiSessions = new Map<string, UserSession>();
 const lastSentMessages = new Map<string, string>();
 const lastUserMessages = new Map<string, string>();
+const lastGroupInteractionTime = new Map<string, number>();
 
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
@@ -153,10 +154,19 @@ async function sendBotReply(
     console.error("Failed to send presence update:", err);
   }
 
-  // Calculate delay based on length of response or a solid randomized human delay
-  // Min 1200ms, Max 4500ms
-  const delay = Math.floor(Math.random() * (4500 - 1200 + 1)) + 1200;
-  await new Promise((resolve) => setTimeout(resolve, delay));
+  // Calculate dynamic delay based on length of response to look highly natural
+  const textLength = String(text || "").length;
+  const baseDelay = Math.floor(Math.random() * 1500) + 1200; // 1200ms to 2700ms base (reading/thinking delay)
+  const charDelay = textLength * 20; // 20ms per character of typing speed
+  let totalDelay = baseDelay + charDelay;
+
+  // Cap total typing duration at 20-30 seconds (randomized ceiling)
+  const maxDelayCap = Math.floor(Math.random() * 10000) + 20000; // 20000ms to 30000ms
+  if (totalDelay > maxDelayCap) {
+    totalDelay = maxDelayCap;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, totalDelay));
 
   try {
     // Notify paused presence before sending message
@@ -201,12 +211,13 @@ async function safeGetGroupName(sock: any, jid: string): Promise<string> {
   }
 }
 
-function shouldSkipMessage(
+async function shouldSkipMessage(
+  sock: any,
   msg: proto.IWebMessageInfo,
   from: string | null | undefined,
   text: string | null,
   resolvedSenderId?: string,
-): boolean {
+): Promise<boolean> {
   const msgId = msg.key?.id || "unknown";
 
   if (!msg?.message) {
@@ -239,6 +250,48 @@ function shouldSkipMessage(
 
   const isCommand = normalizedText.startsWith(COMMAND_PREFIX);
   const isAdmin = isAdminSender(msg, resolvedSenderId);
+
+  // ── ANNOUNCEMENT GROUP / ADMINS-ONLY GUARDRAILS ──
+  if (from && from.endsWith("@g.us")) {
+    try {
+      const metadata = await sock.groupMetadata(from);
+      if (metadata && metadata.announce) {
+        // 1. Verify if the bot itself is an admin in this announcement group
+        const botJid = normalizeJid(sock.user?.id || "");
+        const isBotAdmin = metadata.participants.some((p: any) => {
+          const pid = p.id ? normalizeJid(p.id) : null;
+          const plid = p.lid ? normalizeJid(p.lid) : null;
+          return (
+            (pid && pid === botJid) ||
+            (plid && plid === botJid)
+          ) && (p.admin === "admin" || p.admin === "superadmin");
+        });
+
+        if (!isBotAdmin) {
+          // Complete mute to prevent 403 server blocks / bans
+          logStructured({
+            event: "command_skipped",
+            reason: "announcement_group_bot_not_admin",
+            groupHash: getJidHash(from),
+          });
+          return true;
+        }
+
+        // 2. Even if the bot is admin, block public command replies to keep announcement channel clean
+        if (isCommand) {
+          logStructured({
+            event: "command_skipped",
+            reason: "announcement_group_cleanliness_mute",
+            command: commandName,
+            groupHash: getJidHash(from),
+          });
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to check announcement status in shouldSkipMessage:", err);
+    }
+  }
 
   // Public utility commands that can be run in any group or DM (even unapproved ones)
   const publicExemptCommands = ["getjid", "whoami"];
@@ -648,6 +701,10 @@ async function startBot(): Promise<void> {
 
       if (!from) continue;
 
+      if (from.endsWith("@g.us")) {
+        lastGroupInteractionTime.set(from, Date.now());
+      }
+
       let senderId = getSenderId(msg);
       if (msg.key?.fromMe && sock.user?.id) {
         senderId = normalizeJid(sock.user.id) as string;
@@ -904,7 +961,7 @@ async function startBot(): Promise<void> {
       }
       // ── END INTRO DETECTION ──────────────────────────────────────────────
 
-      if (shouldSkipMessage(msg, from, text, senderId)) {
+      if (await shouldSkipMessage(sock, msg, from, text, senderId)) {
         continue;
       }
 
@@ -1773,8 +1830,22 @@ async function startBot(): Promise<void> {
             if (list.length === 0) {
               await sendBotReply(sock, from || "", "The bot is not currently in any groups.");
             } else {
-              const formatted = list.map((g, idx) => `${idx + 1}. ${g.subject} | JID: ${g.id}`);
-              await sendBotReply(sock, from || "", `Groups the bot is in:\n${formatted.join("\n")}`);
+              // Sort groups by last interaction time (descending)
+              const listWithTime = list.map((g) => {
+                const lastTime = lastGroupInteractionTime.get(g.id) || 0;
+                return { g, lastTime };
+              });
+              listWithTime.sort((a, b) => b.lastTime - a.lastTime);
+
+              // Limit to top 15 groups
+              const top15 = listWithTime.slice(0, 15).map(item => item.g);
+
+              const formatted = top15.map((g, idx) => `${idx + 1}. ${g.subject} | JID: ${g.id}`);
+              await sendBotReply(
+                sock,
+                from || "",
+                `Groups the bot is in (top 15 sorted by recent interaction):\n${formatted.join("\n")}`
+              );
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
