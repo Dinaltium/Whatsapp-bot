@@ -217,6 +217,10 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     let raw = (data?.choices?.[0]?.message?.content || "").trim();
     // Strip markdown fences if model wraps the JSON
     raw = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      raw = jsonMatch[0];
+    }
     const parsed = JSON.parse(raw);
     return {
       isMentor: parsed.classification === "mentor",

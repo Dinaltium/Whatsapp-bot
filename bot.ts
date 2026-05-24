@@ -559,6 +559,9 @@ async function startBot(): Promise<void> {
   sock.ev.on("group-participants.update", async (update) => {
     try {
       const { storeLidPhoneMapping } = await import("./storage/dk24Store");
+      const groupBot = groupConfig.getGroupBot(update.id);
+      const isBot2 = groupBot?.botNumber === 2;
+
       for (const participant of update.participants || []) {
         if (!participant) continue;
         const pid = typeof participant === "string" ? normalizeJid(participant) : (participant.id ? normalizeJid(participant.id) : null);
@@ -583,6 +586,23 @@ async function startBot(): Promise<void> {
 
         if (resolvedLid && resolvedPn) {
           await storeLidPhoneMapping(resolvedLid, resolvedPn);
+        }
+
+        // Auto-register new participant to pendingIntros if action is 'add' and group is Bot 2
+        if (isBot2 && update.action === "add") {
+          const targetJid = resolvedPn || pid;
+          if (targetJid && !targetJid.endsWith("@g.us")) {
+            pendingIntros.set(targetJid, {
+              groupJid: update.id,
+              triggeredAt: Date.now(),
+            });
+            logStructured({
+              event: "intro_tracker_watch_add_event",
+              bot: 2,
+              groupHash: getJidHash(update.id),
+              targetHash: getJidHash(targetJid),
+            });
+          }
         }
       }
     } catch (_e) { /* non-critical */ }
