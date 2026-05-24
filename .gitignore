@@ -46,3 +46,4 @@ test.ts
 # Security and project layout documentation (local reference only)
 security.md
 projectStructure.md
+commands.md
