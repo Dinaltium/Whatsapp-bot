@@ -1,4 +1,4 @@
-import { Mentor } from "../storage/dk24Store";
+import { Mentor } from "../storage/DKB/mentorRepository";
 
 const DKB_HEADER = "```\n"+
 "██████╗ ██╗  ██╗██████╗\n" +
