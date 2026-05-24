@@ -1,13 +1,15 @@
-import {
-  getClubs,
-  getEventsForMonth,
-  normalizeMonthYear,
-  searchEventsGlobally,
-  getMentors,
-  Event,
-} from "../storage/dk24Store";
+import { getClubs } from "../storage/DKB/communityRepository";
+import { getEventsForMonth, normalizeMonthYear, searchEventsGlobally, Event } from "../storage/DKB/eventRepository";
+import { getMentors } from "../storage/DKB/mentorRepository";
 import { cleanRole } from "../utils/normalization";
 import { sanitizeForPrompt } from "../security/promptFirewall";
+
+function wrapCDATA(value?: string | null): string {
+  if (value === undefined || value === null) return "None";
+  const cleaned = sanitizeForPrompt(value);
+  const safe = cleaned.replace(/]]>/g, "]]&gt;");
+  return `<![CDATA[${safe}]]>`;
+}
 
 export async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
   try {
@@ -81,15 +83,15 @@ export async function buildDynamicContextPrompt(userPrompt: string): Promise<str
           str += events
             .map(
               (e) => `
-  - Event Name: ${sanitizeForPrompt(e.title)} (id: ${sanitizeForPrompt(e.id)})
-    Host: ${sanitizeForPrompt(e.host || "N/A")}
-    Date: ${sanitizeForPrompt(e.date || "N/A")}
-    Location: ${sanitizeForPrompt(e.location || "N/A")}
-    Current Stage: ${sanitizeForPrompt(e.stage || "Upcoming")}
-    Registration Deadline: ${sanitizeForPrompt(e.registration_deadline || "N/A")}
-    Prize Pool: ${sanitizeForPrompt(e.prize_pool || "N/A")}
-    Description: ${sanitizeForPrompt(e.description || "N/A")}
-    Tracks: ${e.tracks ? e.tracks.map((t) => sanitizeForPrompt(t)).join(", ") : "N/A"}
+  - Event Name: ${wrapCDATA(e.title)} (id: ${wrapCDATA(e.id)})
+    Host: ${wrapCDATA(e.host)}
+    Date: ${wrapCDATA(e.date)}
+    Location: ${wrapCDATA(e.location)}
+    Current Stage: ${wrapCDATA(e.stage)}
+    Registration Deadline: ${wrapCDATA(e.registration_deadline)}
+    Prize Pool: ${wrapCDATA(e.prize_pool)}
+    Description: ${wrapCDATA(e.description)}
+    Tracks: ${e.tracks ? e.tracks.map((t) => wrapCDATA(t)).join(", ") : "N/A"}
   `,
             )
             .join("\n");
@@ -104,15 +106,15 @@ export async function buildDynamicContextPrompt(userPrompt: string): Promise<str
         globalMatches
           .map(
             (e) => `
-  - Event Name: ${sanitizeForPrompt(e.title)} (id: ${sanitizeForPrompt(e.id)})
-    Host: ${sanitizeForPrompt(e.host || "N/A")}
-    Date: ${sanitizeForPrompt(e.date || "N/A")}
-    Location: ${sanitizeForPrompt(e.location || "N/A")}
-    Current Stage: ${sanitizeForPrompt(e.stage || "Upcoming")}
-    Registration Deadline: ${sanitizeForPrompt(e.registration_deadline || "N/A")}
-    Prize Pool: ${sanitizeForPrompt(e.prize_pool || "N/A")}
-    Description: ${sanitizeForPrompt(e.description || "N/A")}
-    Tracks: ${e.tracks ? e.tracks.map((t) => sanitizeForPrompt(t)).join(", ") : "N/A"}
+  - Event Name: ${wrapCDATA(e.title)} (id: ${wrapCDATA(e.id)})
+    Host: ${wrapCDATA(e.host)}
+    Date: ${wrapCDATA(e.date)}
+    Location: ${wrapCDATA(e.location)}
+    Current Stage: ${wrapCDATA(e.stage)}
+    Registration Deadline: ${wrapCDATA(e.registration_deadline)}
+    Prize Pool: ${wrapCDATA(e.prize_pool)}
+    Description: ${wrapCDATA(e.description)}
+    Tracks: ${e.tracks ? e.tracks.map((t) => wrapCDATA(t)).join(", ") : "N/A"}
   `,
           )
           .join("\n");
@@ -127,12 +129,12 @@ MEMBER_COMMUNITIES:
 ${clubs
   .map(
     (c) => `
-- Community Name: ${sanitizeForPrompt(c.name)} (ID: ${sanitizeForPrompt(c.id)})
-  College: ${sanitizeForPrompt(c.college)}
-  Website: ${sanitizeForPrompt(c.website && c.website.toLowerCase().startsWith("http") ? c.website : "None")}
-  Description: ${sanitizeForPrompt(c.description)}
-  Representatives: ${c.representatives.map((r) => `${sanitizeForPrompt(r.name)} (${sanitizeForPrompt(cleanRole(r.role, r.email))})${r.email ? ` - ${sanitizeForPrompt(r.email)}` : ""}`).join(", ")}
-  POCs: ${c.pocs.map((p) => `${sanitizeForPrompt(p.name)} (${sanitizeForPrompt(cleanRole(p.role, p.email))})${p.email ? ` - ${sanitizeForPrompt(p.email)}` : ""}`).join(", ")}
+- Community Name: ${wrapCDATA(c.name)} (ID: ${wrapCDATA(c.id)})
+  College: ${wrapCDATA(c.college)}
+  Website: ${wrapCDATA(c.website)}
+  Description: ${wrapCDATA(c.description)}
+  Representatives: ${c.representatives.map((r) => `${wrapCDATA(r.name)} (${wrapCDATA(cleanRole(r.role, r.email))})${r.email ? ` - ${wrapCDATA(r.email)}` : ""}`).join(", ")}
+  POCs: ${c.pocs.map((p) => `${wrapCDATA(p.name)} (${wrapCDATA(cleanRole(p.role, p.email))})${p.email ? ` - ${wrapCDATA(p.email)}` : ""}`).join(", ")}
 `,
   )
   .join("\n")}
@@ -146,10 +148,10 @@ ${
     ? mentors
         .map(
           (m) => `
-- Mentor Name: ${sanitizeForPrompt(m.name)} (ID: ${sanitizeForPrompt(m.id)})
-  Expertise: ${sanitizeForPrompt(m.expertise)}
-  Organization: ${sanitizeForPrompt(m.organization || "None")}
-  LinkedIn: ${sanitizeForPrompt(m.linkedin || "None")}
+- Mentor Name: ${wrapCDATA(m.name)} (ID: ${wrapCDATA(String(m.id))})
+  Expertise: ${wrapCDATA(m.expertise)}
+  Organization: ${wrapCDATA(m.organization)}
+  LinkedIn: ${wrapCDATA(m.linkedin)}
 `,
         )
         .join("\n")
