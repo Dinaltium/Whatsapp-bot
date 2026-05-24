@@ -191,6 +191,16 @@ function extractMessageText(
   );
 }
 
+async function safeGetGroupName(sock: any, jid: string): Promise<string> {
+  if (!jid || !jid.endsWith("@g.us")) return "Not a Group";
+  try {
+    const metadata = await sock.groupMetadata(jid);
+    return metadata.subject || "Unknown Group Name";
+  } catch (error) {
+    return "Unknown Group Name";
+  }
+}
+
 function shouldSkipMessage(
   msg: proto.IWebMessageInfo,
   from: string | null | undefined,
@@ -247,6 +257,7 @@ function shouldSkipMessage(
     "disablechat",
     "enablegroup",
     "enablechat",
+    "findgroups",
     "neonping",
     "neonconnect",
     // NOTE: "manage" is NOT here — it has its own RBAC gate inside the handler
@@ -899,10 +910,11 @@ async function startBot(): Promise<void> {
               pending.jid,
               JSON.stringify({ jid: pending.jid, botNumber: pending.botNumber })
             );
+            const groupName = await safeGetGroupName(sock, pending.jid);
             await sendBotReply(
               sock,
               from || "",
-              `Successfully removed Group ID: ${pending.id} | JID: ${pending.jid} from the allowlist.`
+              `Successfully removed Group ID: ${pending.id} | Name: ${groupName} | JID: ${pending.jid} from the allowlist.`
             );
           } else {
             await sendBotReply(
@@ -975,10 +987,11 @@ async function startBot(): Promise<void> {
               pending.jid,
               JSON.stringify({ botNumber: pending.botNumber })
             );
+            const groupName = await safeGetGroupName(sock, pending.jid);
             await sendBotReply(
               sock,
               from || "",
-              `Changed Group ID: ${pending.id} to use Bot ${pending.botNumber}.`
+              `Changed Group ID: ${pending.id} | Name: ${groupName} to use Bot ${pending.botNumber}.`
             );
           } else {
             await sendBotReply(
@@ -1186,6 +1199,7 @@ async function startBot(): Promise<void> {
           "disablechat",
           "enablegroup",
           "enablechat",
+          "findgroups",
           "neonping",
           "neonconnect",
         ].includes(cmdName)
@@ -1208,7 +1222,7 @@ async function startBot(): Promise<void> {
               "No groups configured (allowlist is empty).",
             );
           } else {
-            const formatted = list.map((entry) => {
+            const formattedPromises = list.map(async (entry) => {
               const botLabel =
                 entry.botNumber === 1
                   ? "ECB"
@@ -1218,8 +1232,10 @@ async function startBot(): Promise<void> {
                       ? "TEMP"
                       : "PARAG";
               const statusLabel = entry.enabled ? "Enabled" : "Disabled";
-              return `${entry.id}. ${entry.jid} | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
+              const groupName = await safeGetGroupName(sock, entry.jid);
+              return `${entry.id}. ${groupName} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
             });
+            const formatted = await Promise.all(formattedPromises);
             await sendBotReply(
               sock,
               from || "",
@@ -1277,6 +1293,7 @@ async function startBot(): Promise<void> {
           if (ok) {
             const groupEntry = groupConfig.getGroupEntryByJid(target);
             const idLabel = groupEntry ? ` (ID: ${groupEntry.id})` : "";
+            const groupName = await safeGetGroupName(sock, target);
             const { logAction } = await import("./storage/dk24Store");
             await logAction(
               senderId || "unknown",
@@ -1288,7 +1305,7 @@ async function startBot(): Promise<void> {
             await sendBotReply(
               sock,
               from || "",
-              `Added ${target} to group allowlist${idLabel} (Bot ${isNaN(botNumber) ? 0 : botNumber}).`,
+              `Added group ${groupName} (${target}) to group allowlist${idLabel} (Bot ${isNaN(botNumber) ? 0 : botNumber}).`,
             );
           } else {
             await sendBotReply(
@@ -1364,6 +1381,8 @@ async function startBot(): Promise<void> {
             continue;
           }
 
+          const groupName = await safeGetGroupName(sock, groupEntry.jid);
+
           session.pendingDeleteGroup = {
             id: groupId,
             jid: groupEntry.jid,
@@ -1381,7 +1400,7 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            `Are you sure you want to remove Group ID: ${groupId} | JID: ${groupEntry.jid} | Bot: ${groupEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
+            `Are you sure you want to remove Group ID: ${groupId} | Name: ${groupName} | JID: ${groupEntry.jid} | Bot: ${groupEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
           );
           continue;
         }
@@ -1465,6 +1484,8 @@ async function startBot(): Promise<void> {
             continue;
           }
 
+          const groupName = await safeGetGroupName(sock, groupEntry.jid);
+
           session.pendingEditGroup = {
             id: groupId,
             jid: groupEntry.jid,
@@ -1477,7 +1498,7 @@ async function startBot(): Promise<void> {
           await sendBotReply(
             sock,
             from || "",
-            `Are you sure you want to change Group ID: ${groupId} | JID: ${groupEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${groupEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
+            `Are you sure you want to change Group ID: ${groupId} | Name: ${groupName} | JID: ${groupEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${groupEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
           );
           continue;
         }
@@ -1721,6 +1742,23 @@ async function startBot(): Promise<void> {
               from || "",
               `Failed to enable Chat ID: ${chatId}.`
             );
+          }
+          continue;
+        }
+
+        if (cmdName === "findgroups") {
+          try {
+            const groups = await sock.groupFetchAllParticipating();
+            const list = Object.values(groups);
+            if (list.length === 0) {
+              await sendBotReply(sock, from || "", "The bot is not currently in any groups.");
+            } else {
+              const formatted = list.map((g, idx) => `${idx + 1}. ${g.subject} | JID: ${g.id}`);
+              await sendBotReply(sock, from || "", `Groups the bot is in:\n${formatted.join("\n")}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await sendBotReply(sock, from || "", `Failed to fetch groups:\n${msg}`);
           }
           continue;
         }
