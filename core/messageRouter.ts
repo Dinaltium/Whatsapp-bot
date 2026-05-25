@@ -22,6 +22,14 @@ import {
 import { COMMAND_PREFIX, GROQ_API_KEY, GROQ_MODEL, extractMessageText, shouldSkipMessage, extractMentionedJids, sendBotReply, addSessionMessage, safeGetGroupName, buildSessionKey } from "../bot";
 import { redis } from "../storage/redisClient";
 
+function unwrapMessage(message: any): any {
+  if (!message) return null;
+  if (message.ephemeralMessage?.message) {
+    return unwrapMessage(message.ephemeralMessage.message);
+  }
+  return message;
+}
+
 export async function handleMessageUpsert(
   sock: ReturnType<typeof makeWASocket>,
   messages: proto.IWebMessageInfo[],
@@ -44,11 +52,14 @@ export async function handleMessageUpsert(
 
       // ── CACHE LATEST VIEW-ONCE MESSAGE ──────────────────────────────────
       if (msg.message) {
-        const hasViewOnce = msg.message.viewOnceMessage 
-          || msg.message.viewOnceMessageV2 
-          || (msg.message as any).viewOnceMessageV2Lid;
-        if (hasViewOnce) {
-          await redis.setex(`latest_view_once:${from}`, 3600, JSON.stringify(msg));
+        const unwrapped = unwrapMessage(msg.message);
+        if (unwrapped) {
+          const hasViewOnce = unwrapped.viewOnceMessage 
+            || unwrapped.viewOnceMessageV2 
+            || unwrapped.viewOnceMessageV2Lid;
+          if (hasViewOnce) {
+            await redis.setex(`latest_view_once:${from}`, 3600, JSON.stringify(msg));
+          }
         }
       }
 
@@ -1644,12 +1655,21 @@ export async function handleMessageUpsert(
         }
 
         // Unpack view-once containers if present
-        const innerMsg = targetMsg.message;
-        const viewOnceContainer = innerMsg.viewOnceMessage 
-          || innerMsg.viewOnceMessageV2 
-          || (innerMsg as any).viewOnceMessageV2Lid;
+        const unwrapped = unwrapMessage(targetMsg.message);
+        if (!unwrapped) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Error: Decrypted message has invalid structure.",
+          );
+          continue;
+        }
 
-        let mediaMsg = innerMsg;
+        const viewOnceContainer = unwrapped.viewOnceMessage 
+          || unwrapped.viewOnceMessageV2 
+          || unwrapped.viewOnceMessageV2Lid;
+
+        let mediaMsg = unwrapped;
         let isViewOnce = false;
         if (viewOnceContainer && viewOnceContainer.message) {
           mediaMsg = viewOnceContainer.message;
