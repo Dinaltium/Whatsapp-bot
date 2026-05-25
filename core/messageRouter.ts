@@ -1,5 +1,5 @@
 
-import { default as makeWASocket, proto } from "@whiskeysockets/baileys";
+import { default as makeWASocket, proto, downloadMediaMessage } from "@whiskeysockets/baileys";
 import WhatsAppAgent from "../agents/WhatsAppAgent";
 import DKBAgent from "../agents/DKBAgent";
 import groupConfig from "../config/groupAllowlist";
@@ -41,6 +41,16 @@ export async function handleMessageUpsert(
       const text = textRaw ? textRaw.trim() : null;
 
       if (!from) continue;
+
+      // ── CACHE LATEST VIEW-ONCE MESSAGE ──────────────────────────────────
+      if (msg.message) {
+        const hasViewOnce = msg.message.viewOnceMessage 
+          || msg.message.viewOnceMessageV2 
+          || (msg.message as any).viewOnceMessageV2Lid;
+        if (hasViewOnce) {
+          await redis.setex(`latest_view_once:${from}`, 3600, JSON.stringify(msg));
+        }
+      }
 
       if (msg.key?.id) {
         const isSet = await redis.set(`msg_idemp:${msg.key.id}`, "1", "EX", 300, "NX");
@@ -314,6 +324,17 @@ export async function handleMessageUpsert(
       const session = await getSession(sessionKey);
 
       // resetSessionIfExpired is handled by Redis TTL
+
+      // ── INTERCEPT ROLE CREATION/MODIFICATION DIALOGUE ───────────────────
+      if (session.pendingCreateRole) {
+        const handled = await handleRoleDialogue(text!, session, async (replyText) => {
+          await sendBotReply(sock, from || "", replyText);
+        });
+        if (handled) {
+          await saveSession(sessionKey, session);
+          continue;
+        }
+      }
 
       // ── INTERCEPT ALLOWLIST CONFIRMATIONS ────────────────────────────────
       if (session.pendingDeleteGroup) {
@@ -1529,6 +1550,180 @@ export async function handleMessageUpsert(
             "Failed to assign role. Ensure the database connection is healthy and the role is valid.",
           );
         }
+        continue;
+      }
+
+      if (cmdName === "createrole" || cmdName === "role") {
+        if (botNumber !== 2) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Error: This command is only available for Bot 2 (DKB).",
+          );
+          continue;
+        }
+
+        const isRoleAdmin = isAdminAction(msg, senderId);
+        const isRoleAuthorized = isRoleAdmin ||
+          (senderId && await (async () => {
+            const { userHasPermission } = await import("../storage/core/rbacRepository");
+            return userHasPermission(senderId, "role.manage");
+          })());
+        if (!isRoleAuthorized) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Unauthorized: you need admin privileges or the role.manage permission to use this command.",
+          );
+          continue;
+        }
+
+        const roleArg = cmdArgs.join(" ").trim();
+        if (!roleArg) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Usage: !role <role_name>\nExample: !role organizer",
+          );
+          continue;
+        }
+
+        await handleCreateCommand(roleArg, session, async (replyText) => {
+          await sendBotReply(sock, from || "", replyText);
+        });
+        await saveSession(sessionKey, session);
+        continue;
+      }
+
+      if (cmdName === "reveal") {
+        const isRevealAuthorized = isAdminAction(msg, senderId);
+        if (!isRevealAuthorized) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Unauthorized: admin privileges required for this command.",
+          );
+          continue;
+        }
+
+        const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+        let targetMsg: any = null;
+        let sourceLabel = "";
+
+        if (contextInfo && contextInfo.quotedMessage) {
+          // Mode A: Quoted message mode
+          targetMsg = {
+            key: {
+              remoteJid: from,
+              id: contextInfo.stanzaId,
+              participant: contextInfo.participant
+            },
+            message: contextInfo.quotedMessage
+          };
+          sourceLabel = "quoted message";
+        } else {
+          // Mode B: Standalone mode (fetch latest from Redis)
+          const cachedJson = await redis.get(`latest_view_once:${from}`);
+          if (cachedJson) {
+            try {
+              targetMsg = JSON.parse(cachedJson);
+              sourceLabel = "latest cached view-once message";
+            } catch (e) {
+              console.error("Failed to parse cached view-once message:", e);
+            }
+          }
+        }
+
+        if (!targetMsg || !targetMsg.message) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "Error: No quoted message provided, and no recent view-once media was found in this chat.",
+          );
+          continue;
+        }
+
+        // Unpack view-once containers if present
+        const innerMsg = targetMsg.message;
+        const viewOnceContainer = innerMsg.viewOnceMessage 
+          || innerMsg.viewOnceMessageV2 
+          || (innerMsg as any).viewOnceMessageV2Lid;
+
+        let mediaMsg = innerMsg;
+        let isViewOnce = false;
+        if (viewOnceContainer && viewOnceContainer.message) {
+          mediaMsg = viewOnceContainer.message;
+          isViewOnce = true;
+        }
+
+        const imageInfo = mediaMsg.imageMessage;
+        const videoInfo = mediaMsg.videoMessage;
+        const audioInfo = mediaMsg.audioMessage;
+        const docInfo = mediaMsg.documentMessage;
+
+        if (!imageInfo && !videoInfo && !audioInfo && !docInfo) {
+          await sendBotReply(
+            sock,
+            from || "",
+            `Error: The ${sourceLabel} does not contain decryptable media (image, video, audio, or document).`,
+          );
+          continue;
+        }
+
+        const targetPrivateJid = senderId || from || "";
+
+        try {
+          const buffer = await downloadMediaMessage(
+            targetMsg,
+            "buffer",
+            {}
+          ) as Buffer;
+
+          if (imageInfo) {
+            await sock.sendMessage(targetPrivateJid, {
+              image: buffer,
+              caption: isViewOnce ? "🔓 Revealed View Once Photo!" : "Decrypted Photo!"
+            });
+          } else if (videoInfo) {
+            await sock.sendMessage(targetPrivateJid, {
+              video: buffer,
+              caption: isViewOnce ? "🔓 Revealed View Once Video!" : "Decrypted Video!"
+            });
+          } else if (audioInfo) {
+            await sock.sendMessage(targetPrivateJid, {
+              audio: buffer,
+              mimetype: audioInfo.mimetype || "audio/mp4",
+              ptt: audioInfo.ptt || false
+            });
+          } else if (docInfo) {
+            await sock.sendMessage(targetPrivateJid, {
+              document: buffer,
+              mimetype: docInfo.mimetype || "application/octet-stream",
+              fileName: docInfo.fileName || "revealed_file"
+            });
+          }
+
+          await sendBotReply(
+            sock,
+            from || "",
+            `🔓 Decrypted and sent the ${sourceLabel} privately to your DM. Check your private chat!`
+          );
+
+        } catch (err) {
+          console.error("Failed to decrypt view-once media:", err);
+          try {
+            await sock.sendMessage(targetPrivateJid, {
+              text: `⚠️ Error: The view-once media could not be decrypted or downloaded. It may have expired, already been viewed, or been deleted from the WhatsApp servers.`
+            });
+          } catch (_) {}
+
+          await sendBotReply(
+            sock,
+            from || "",
+            "⚠️ Failed to reveal media. A direct message explaining the error has been sent to your private chat."
+          );
+        }
+
         continue;
       }
 
