@@ -1,5 +1,4 @@
 import { Worker } from "bullmq";
-import Redis from "ioredis";
 import { getActiveSocket } from "../../bot";
 
 const REDIS_URL = process.env.REDIS_URL;
@@ -9,9 +8,8 @@ if (!REDIS_URL) {
   process.exit(1);
 }
 
-const connectionOpts = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
+// BullMQ v5 accepts a URL string directly — no ioredis import needed.
+const connection = { url: REDIS_URL, maxRetriesPerRequest: null };
 
 export const outgoingWorker = new Worker(
   "outgoing-replies",
@@ -52,7 +50,7 @@ export const outgoingWorker = new Worker(
     console.log(`[ReplyWorker] Reply dispatched successfully to ${to}`);
   },
   {
-    connection: connectionOpts,
+    connection,
     concurrency: 5, // Dispatch up to 5 replies in parallel
   }
 );

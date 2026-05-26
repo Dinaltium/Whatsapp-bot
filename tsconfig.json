@@ -15,6 +15,14 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["bot.ts", "agents/**/*.ts", "config/**/*.ts", "storage/**/*.ts"],
+  "include": [
+    "bot.ts",
+    "agents/**/*.ts",
+    "config/**/*.ts",
+    "storage/**/*.ts",
+    "core/**/*.ts",
+    "infrastructure/**/*.ts",
+    "services/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

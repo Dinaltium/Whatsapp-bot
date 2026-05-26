@@ -1,5 +1,4 @@
 import { Queue } from "bullmq";
-import Redis from "ioredis";
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -8,13 +7,13 @@ if (!REDIS_URL) {
   process.exit(1);
 }
 
-// Dedicated connection for the queues to avoid sharing blocks
-export const connectionOpts = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
+// BullMQ v5 accepts a URL string as ConnectionOptions directly.
+// This avoids the ioredis type collision between bullmq's bundled ioredis
+// and the root-level ioredis package.
+const connection = { url: REDIS_URL, maxRetriesPerRequest: null };
 
 export const incomingQueue = new Queue("incoming-messages", {
-  connection: connectionOpts,
+  connection,
   defaultJobOptions: {
     removeOnComplete: true,
     removeOnFail: 100, // Keep last 100 failures for auditing/debugging
@@ -27,7 +26,7 @@ export const incomingQueue = new Queue("incoming-messages", {
 });
 
 export const outgoingQueue = new Queue("outgoing-replies", {
-  connection: connectionOpts,
+  connection,
   defaultJobOptions: {
     removeOnComplete: true,
     removeOnFail: 100,
@@ -43,8 +42,7 @@ export async function closeQueues(): Promise<void> {
   try {
     await incomingQueue.close();
     await outgoingQueue.close();
-    await connectionOpts.quit();
-    console.log("BullMQ queues and connection closed successfully.");
+    console.log("BullMQ queues closed successfully.");
   } catch (e) {
     console.error("Error closing BullMQ queues:", e);
   }
