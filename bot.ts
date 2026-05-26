@@ -659,6 +659,16 @@ async function startBot(): Promise<void> {
               groupJid: update.id,
               triggeredAt: Date.now(),
             });
+
+            // Also store in Redis so messageRouter can see it
+            import("./core/state").then(({ addPendingIntro }) => {
+              addPendingIntro(targetJid, update.id).catch(err => {
+                console.error("Failed to add pending intro to Redis:", err);
+              });
+            }).catch(err => {
+              console.error("Failed to import state in group-participants.update:", err);
+            });
+
             logStructured({
               event: "intro_tracker_watch_add_event",
               bot: 2,

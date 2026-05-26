@@ -303,6 +303,7 @@ export async function handleMessageUpsert(
                 GROQ_API_KEY,
                 GROQ_MODEL,
               );
+              
               if (result.isMentor) {
                 logStructured({
                   event: "intro_classified",
@@ -317,6 +318,20 @@ export async function handleMessageUpsert(
                   userHash: getJidHash(introSenderId),
                 });
               }
+
+              // Send the welcome message if we received one, else use a fallback
+              let welcomeText = result.welcomeMessage;
+              if (!welcomeText) {
+                const displayName = result.mentorName || "there";
+                if (result.isMentor) {
+                  welcomeText = `Hi ${displayName}, welcome to DK24! Glad to have you with us as a mentor. We look forward to your active presence in our developer community!`;
+                } else {
+                  welcomeText = `Hi ${displayName}, welcome to DK24! Glad to have you join us as a student. We hope you connect, learn, and grow with the community!`;
+                }
+              }
+
+              await sendBotReply(sock, from, welcomeText);
+              
             } catch (err) {
               console.error("[DEBUG] Intro classification error:", err);
             }

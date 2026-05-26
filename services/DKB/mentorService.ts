@@ -168,6 +168,7 @@ export async function classifyIntroduction(
   description: string;
   linkedin: string;
   email: string;
+  welcomeMessage?: string;
 } | null> {
   if (!groqApiKey || !introText.trim()) return null;
 
@@ -190,7 +191,8 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "expertise": "technologies, skills, or domain or empty string",
   "description": "one sentence summary of who they are",
   "linkedin": "linkedin URL if mentioned else empty string",
-  "email": "email address if mentioned else empty string"
+  "email": "email address if mentioned else empty string",
+  "welcomeMessage": "A warm, concise, and enthusiastic welcome message in English tailored to their background. It MUST start with 'Hi {Name}, welcome to DK24!' (replace {Name} with their actual extracted name, e.g. 'Hi Rohan, welcome to DK24!'). Reference their skills/background/company/college in one sentence, and end with a brief sentence of encouragement about connecting with the community."
 }`;
 
   try {
@@ -230,6 +232,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
       description: String(parsed.description || ""),
       linkedin: String(parsed.linkedin || ""),
       email: String(parsed.email || ""),
+      welcomeMessage: parsed.welcomeMessage ? String(parsed.welcomeMessage) : undefined,
     };
   } catch (error) {
     console.error("[IntroClassifier] Classification error:", error);
@@ -243,33 +246,39 @@ export async function classifyAndAutoAddMentor(
   senderPhone: string,
   groqApiKey: string | undefined,
   groqModel: string,
-): Promise<{ isMentor: boolean; mentorName?: string }> {
+): Promise<{ isMentor: boolean; mentorName?: string; welcomeMessage?: string }> {
   const result = await classifyIntroduction(introText, groqApiKey, groqModel);
-  if (!result || !result.isMentor) return { isMentor: false };
+  if (!result) return { isMentor: false };
 
-  logStructured({
-    event: "mentor_identified",
-    organization: result.organization,
-    userHash: getJidHash(senderJid),
-  });
+  if (result.isMentor) {
+    logStructured({
+      event: "mentor_identified",
+      organization: result.organization,
+      userHash: getJidHash(senderJid),
+    });
 
-  const phone = senderPhone ? `+${senderPhone}` : "";
-  try {
-    await addMentor(
-      result.name || "Unknown",
-      result.organization,
-      result.expertise,
-      result.description,
-      result.linkedin,
-      "", // instagram — not typically in intros
-      "", // github   — not typically in intros
-      result.email,
-      phone,
-      senderJid,
-    );
-    return { isMentor: true, mentorName: result.name || undefined };
-  } catch (error) {
-    console.error("[IntroClassifier] Failed to save mentor to DB:", error);
-    return { isMentor: false };
+    const phone = senderPhone ? `+${senderPhone}` : "";
+    try {
+      await addMentor(
+        result.name || "Unknown",
+        result.organization,
+        result.expertise,
+        result.description,
+        result.linkedin,
+        "", // instagram — not typically in intros
+        "", // github   — not typically in intros
+        result.email,
+        phone,
+        senderJid,
+      );
+    } catch (error) {
+      console.error("[IntroClassifier] Failed to save mentor to DB:", error);
+    }
   }
+
+  return {
+    isMentor: result.isMentor,
+    mentorName: result.name || undefined,
+    welcomeMessage: result.welcomeMessage || undefined,
+  };
 }
