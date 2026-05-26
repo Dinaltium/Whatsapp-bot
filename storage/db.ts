@@ -4,6 +4,22 @@ import { getDatabaseUrl } from "./neonAuthStateStore";
 // Global DB pool holder
 let dbPool: Pool | null = null;
 
+export function setPool(pool: Pool): void {
+  dbPool = pool;
+}
+
+export async function closePool(): Promise<void> {
+  if (dbPool) {
+    try {
+      await dbPool.end();
+      console.log("Database connection pool closed.");
+    } catch (e) {
+      console.error("Error closing database pool:", e);
+    }
+    dbPool = null;
+  }
+}
+
 export function getPool(): Pool | null {
   if (dbPool) return dbPool;
 
@@ -25,7 +41,12 @@ export function getPool(): Pool | null {
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
-          : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" },
+          : {
+              rejectUnauthorized:
+                process.env.NODE_ENV === "production"
+                  ? true
+                  : process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+            },
     });
 
     dbPool.on("error", (err) => {
@@ -38,6 +59,7 @@ export function getPool(): Pool | null {
     return null;
   }
 }
+
 
 // Bootstrap schema
 export async function ensureSchema(): Promise<void> {

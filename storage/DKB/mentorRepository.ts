@@ -32,16 +32,16 @@ export async function addMentor(
   const pool = getPool();
   if (!pool) return false;
 
-  const sName = sanitizeForPrompt(name);
-  const sOrg = org ? sanitizeForPrompt(org) : "";
-  const sExpertise = expertise ? sanitizeForPrompt(expertise) : null;
-  const sDescription = description ? sanitizeForPrompt(description) : null;
-  const sLinkedin = linkedin ? sanitizeForPrompt(linkedin) : null;
-  const sInstagram = instagram ? sanitizeForPrompt(instagram) : null;
-  const sGithub = github ? sanitizeForPrompt(github) : null;
-  const sEmail = email ? sanitizeForPrompt(email) : null;
-  const sPhone = phone ? sanitizeForPrompt(phone) : null;
-  const sAddedBy = addedBy ? sanitizeForPrompt(addedBy) : null;
+  const sName = name ? name.trim().slice(0, 100) : "Unknown";
+  const sOrg = org ? org.trim().slice(0, 100) : "";
+  const sExpertise = expertise ? expertise.trim().slice(0, 100) : null;
+  const sDescription = description ? description.trim().slice(0, 300) : null;
+  const sLinkedin = linkedin ? linkedin.trim().slice(0, 200) : null;
+  const sInstagram = instagram ? instagram.trim().slice(0, 200) : null;
+  const sGithub = github ? github.trim().slice(0, 200) : null;
+  const sEmail = email ? email.trim().slice(0, 100) : null;
+  const sPhone = phone ? phone.trim().slice(0, 50) : null;
+  const sAddedBy = addedBy ? addedBy.trim().slice(0, 100) : null;
 
   try {
     const res = await pool.query(
@@ -184,7 +184,19 @@ export async function updateMentorField(
   }
 
   try {
-    const sanitizedValue = value ? sanitizeForPrompt(value) : null;
+    const maxLengths: Record<string, number> = {
+      name: 100,
+      description: 300,
+      organization: 100,
+      expertise: 100,
+      linkedin: 200,
+      instagram: 200,
+      github: 200,
+      phone: 50,
+      email: 100
+    };
+    const maxLen = maxLengths[columnName] || 500;
+    const sanitizedValue = value ? value.trim().slice(0, maxLen) : null;
     const mentor = await getMentorById(id);
     const oldVal = mentor ? (mentor as any)[columnName] : null;
     const res = await pool.query(
@@ -205,5 +217,27 @@ export async function updateMentorField(
   } catch (error) {
     console.error("⚠️ Error updating mentor field:", error);
     return false;
+  }
+}
+
+export async function searchMentorsGlobally(keyword: string): Promise<Mentor[]> {
+  const pool = getPool();
+  if (!pool || !keyword.trim()) return [];
+  try {
+    const trimmed = keyword.trim().toLowerCase();
+    const res = await pool.query(
+      `SELECT id, name, expertise, organization, linkedin, description 
+       FROM dk24_mentors 
+       WHERE LOWER(name) LIKE $1 
+          OR LOWER(expertise) LIKE $1 
+          OR LOWER(organization) LIKE $1 
+       ORDER BY name ASC
+       LIMIT 5`,
+      [`%${trimmed}%`]
+    );
+    return res.rows as Mentor[];
+  } catch (error) {
+    console.error("⚠️ Error searching mentors globally:", error);
+    return [];
   }
 }

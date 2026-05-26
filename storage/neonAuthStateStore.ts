@@ -181,6 +181,7 @@ async function readMany(
 
 async function useNeonAuthState(
   namespace = DEFAULT_NAMESPACE,
+  existingPool: Pool | null = null,
 ): Promise<AuthStateStore> {
   if (!getEncryptionKey()) {
     throw new Error(
@@ -188,35 +189,44 @@ async function useNeonAuthState(
     );
   }
 
-  const databaseUrl = getDatabaseUrl();
+  let pool: Pool;
+  let ownsPool = false;
 
-  if (!databaseUrl) {
-    throw new Error(
-      "DATABASE_URL (or NEON_DATABASE_URL) is required for Neon auth storage.",
-    );
+  if (existingPool) {
+    pool = existingPool;
+  } else {
+    const databaseUrl = getDatabaseUrl();
+
+    if (!databaseUrl) {
+      throw new Error(
+        "DATABASE_URL (or NEON_DATABASE_URL) is required for Neon auth storage.",
+      );
+    }
+
+    pool = new Pool({
+      connectionString: databaseUrl,
+      connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
+      ssl:
+        process.env.DATABASE_SSL === "false"
+          ? false
+          : {
+              rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+            },
+    });
+    ownsPool = true;
+
+    pool.on("error", (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️ Neon pool error: ${message}`);
+    });
   }
-
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
-    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
-    ssl:
-      process.env.DATABASE_SSL === "false"
-        ? false
-        : {
-            rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
-          },
-  });
-
-  pool.on("error", (error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`⚠️ Neon pool error: ${message}`);
-  });
 
   // Pending writes queue (id -> value) and flusher state
   const pendingWrites = new Map<string, StorageValue>();
   let flushTimer: NodeJS.Timeout | null = null;
   const FLUSH_INTERVAL_MS = Number(process.env.DB_FLUSH_INTERVAL_MS || 5000);
+
 
   async function flushPendingWrites(): Promise<void> {
     if (!pendingWrites.size) return;
@@ -345,7 +355,9 @@ async function useNeonAuthState(
         flushTimer = null;
       }
 
-      await pool.end();
+      if (ownsPool && pool) {
+        await pool.end();
+      }
     },
   };
 }

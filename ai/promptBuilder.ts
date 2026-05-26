@@ -1,6 +1,6 @@
 import { getClubs } from "../storage/DKB/communityRepository";
 import { getEventsForMonth, normalizeMonthYear, searchEventsGlobally, Event } from "../storage/DKB/eventRepository";
-import { getMentors } from "../storage/DKB/mentorRepository";
+import { getMentors, searchMentorsGlobally } from "../storage/DKB/mentorRepository";
 import { cleanRole } from "../utils/normalization";
 import { sanitizeForPrompt } from "../security/promptFirewall";
 
@@ -120,7 +120,42 @@ export async function buildDynamicContextPrompt(userPrompt: string): Promise<str
           .join("\n");
     }
 
-    const mentors = await getMentors();
+    // Stage 2: Targeted Mentor RAG Context Search
+    const isMentorQuery = /\b(?:mentor|speaker|expert|advisor|coach|help|guide|teach|learn|contact|connect|recommend)\b/i.test(userPrompt);
+    const matchedMentorsMap = new Map<number, any>();
+    
+    if (isMentorQuery || uniqueWords.length > 0) {
+      for (const word of uniqueWords) {
+        const matches = await searchMentorsGlobally(word);
+        for (const m of matches) {
+          if (m.id) {
+            matchedMentorsMap.set(m.id, m);
+          }
+        }
+      }
+    }
+    
+    const matchedMentors = Array.from(matchedMentorsMap.values()).slice(0, 5);
+    
+    let mentorsStr = "";
+    if (matchedMentors.length > 0) {
+      mentorsStr = matchedMentors
+        .map(
+          (m) => `
+- Mentor Name: ${wrapCDATA(m.name)} (ID: ${wrapCDATA(String(m.id))})
+  Expertise: ${wrapCDATA(m.expertise)}
+  Organization: ${wrapCDATA(m.organization)}
+  LinkedIn: ${wrapCDATA(m.linkedin)}
+  Description: ${wrapCDATA(m.description)}
+`,
+        )
+        .join("\n") + `\n... (Recommend the user search using "!mentors" or filter using keyword tags e.g. "!mentor -f React" to see full directory listings)`;
+    } else if (isMentorQuery) {
+      mentorsStr = "No matching mentors found in directory matching your exact search terms.";
+    } else {
+      // Generic conversational context - inject zero mentor directory bloat
+      mentorsStr = "Mentor Directory Context omitted to optimize token usage. Advise the user to ask explicitly about 'mentors' or search using keyword tags (e.g. 'Who is an expert in React?') to list active mentor records.";
+    }
 
     return `
 <community_database>
@@ -143,20 +178,7 @@ CALENDAR_EVENTS:
 ${eventsStr}
 
 MENTORS_DIRECTORY:
-${
-  mentors.length > 0
-    ? mentors
-        .map(
-          (m) => `
-- Mentor Name: ${wrapCDATA(m.name)} (ID: ${wrapCDATA(String(m.id))})
-  Expertise: ${wrapCDATA(m.expertise)}
-  Organization: ${wrapCDATA(m.organization)}
-  LinkedIn: ${wrapCDATA(m.linkedin)}
-`,
-        )
-        .join("\n")
-    : "No mentors listed yet."
-}
+${mentorsStr}
 
 </community_database>
 `;

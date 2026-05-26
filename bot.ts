@@ -83,6 +83,34 @@ const lastSentMessages = new Map<string, string>();
 const lastUserMessages = new Map<string, string>();
 const lastGroupInteractionTime = new Map<string, number>();
 
+import {
+  getActiveSocket as getClientSocket,
+  setActiveSocket,
+  cleanupBotInstance as cleanupClientInstance
+} from "./infrastructure/whatsapp/whatsappClient";
+
+let activeAuthStore: any = null;
+
+export function getActiveSocket(): any {
+  return getClientSocket();
+}
+
+export async function cleanupBotInstance(): Promise<void> {
+  await cleanupClientInstance();
+
+  if (activeAuthStore) {
+    try {
+      if (activeAuthStore.close) {
+        await activeAuthStore.close();
+      }
+    } catch (e) {
+      console.warn("Error closing active auth store:", e);
+    }
+    activeAuthStore = null;
+  }
+}
+
+
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
 // Key: normalized sender JID.  Value: { group JID, timestamp }
@@ -148,37 +176,17 @@ export async function sendBotReply(
   text: string,
 ): Promise<void> {
   try {
-    // Notify composing/typing presence
-    await sock.sendPresenceUpdate("composing", to);
+    const trimmedText = String(text || "").trim();
+    if (!trimmedText) return;
+    
+    lastSentMessages.set(to, trimmedText);
+    
+    const { outgoingQueue } = await import("./infrastructure/queue/queueManager");
+    await outgoingQueue.add("send-reply", { to, text: trimmedText });
+    console.log(`[bot.ts] Reply queued for asynchronous dispatch to ${to}`);
   } catch (err) {
-    console.error("Failed to send presence update:", err);
+    console.error("Failed to queue reply:", err);
   }
-
-  // Calculate dynamic delay based on length of response to look highly natural
-  const textLength = String(text || "").length;
-  const baseDelay = Math.floor(Math.random() * 1500) + 1200; // 1200ms to 2700ms base (reading/thinking delay)
-  const charDelay = textLength * 20; // 20ms per character of typing speed
-  let totalDelay = baseDelay + charDelay;
-
-  // Cap total typing duration at 20-30 seconds (randomized ceiling)
-  const maxDelayCap = Math.floor(Math.random() * 10000) + 20000; // 20000ms to 30000ms
-  if (totalDelay > maxDelayCap) {
-    totalDelay = maxDelayCap;
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, totalDelay));
-
-  try {
-    // Notify paused presence before sending message
-    await sock.sendPresenceUpdate("paused", to);
-  } catch (err) {}
-
-  const trimmedText = String(text || "").trim();
-  lastSentMessages.set(to, trimmedText);
-
-  await sock.sendMessage(to, {
-    text: trimmedText,
-  });
 }
 
 export function extractMessageText(
@@ -474,17 +482,21 @@ async function startBot(): Promise<void> {
   }
 
   const databaseUrl = getDatabaseUrl();
-  let authStore:
-    | Awaited<ReturnType<typeof useNeonAuthState>>
-    | Awaited<ReturnType<typeof useMultiFileAuthState>>;
+  let authStore: any;
 
   if (databaseUrl) {
     try {
-      authStore = await useNeonAuthState("parag");
-      console.log("Using Neon PostgreSQL for auth state storage.");
+      const { ensureSchema, getPool } = await import("./storage/db");
+      const sharedPool = getPool();
+      if (!sharedPool) {
+        throw new Error("Failed to initialize database pool");
+      }
+
+      authStore = await useNeonAuthState("parag", sharedPool);
+      activeAuthStore = authStore;
+      console.log("Using Neon PostgreSQL for auth state storage with shared pool.");
 
       // Bootstrap PostgreSQL schemas
-      const { ensureSchema } = await import("./storage/db");
       await ensureSchema();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -503,6 +515,12 @@ async function startBot(): Promise<void> {
   await chatConfig.init();
   console.log("Allowlists initialized.");
 
+  // Boot BullMQ queue workers to start listening for jobs
+  console.log("Initializing BullMQ queue workers...");
+  await import("./infrastructure/queue/incomingWorker");
+  await import("./infrastructure/queue/outgoingWorker");
+  console.log("BullMQ queue workers initialized and listening.");
+
   const { state, saveCreds } = authStore;
 
   const { version } = await fetchLatestBaileysVersion();
@@ -515,6 +533,7 @@ async function startBot(): Promise<void> {
     }),
     browser: ["Ubuntu", "Chrome", "22.04.4"],
   });
+  setActiveSocket(sock);
 
   sock.ev.on("creds.update", async () => {
     try {
@@ -556,18 +575,21 @@ async function startBot(): Promise<void> {
       if (statusCode === 515) {
         logStructured({ event: "reconnecting", reason: "restart_required" });
 
-        setTimeout(() => {
+        setTimeout(async () => {
+          await cleanupBotInstance();
           startBot();
         }, 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
         logStructured({ event: "connection_logout" });
       } else if (statusCode === DisconnectReason.connectionReplaced) {
         logStructured({ event: "connection_replaced", error: "another_instance" });
+        await cleanupBotInstance();
         process.exit(0);
       } else {
         logStructured({ event: "reconnecting", reason: "generic_close" });
 
-        setTimeout(() => {
+        setTimeout(async () => {
+          await cleanupBotInstance();
           startBot();
         }, 3000);
       }
@@ -708,24 +730,55 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     try {
-        const { handleMessageUpsert } = await import("./core/messageRouter");
-        await handleMessageUpsert(sock, messages, type);
+        const { incomingQueue } = await import("./infrastructure/queue/queueManager");
+        await incomingQueue.add("upsert-message", { messages, type });
+        logStructured({
+          event: "messages_queued",
+          count: messages.length,
+          type,
+        });
     } catch (err) {
-        console.error("Error in message router:", err);
+        console.error("Error queueing incoming messages:", err);
     }
-});
+  });
 
   // Handle graceful shutdown for hosting environments like Render
   process.removeAllListeners("SIGTERM");
   process.removeAllListeners("SIGINT");
 
-  process.on("SIGTERM", () => {
+  process.on("SIGTERM", async () => {
     console.log("Received SIGTERM, shutting down gracefully...");
+    await cleanupBotInstance();
+    try {
+      const { closeQueues } = await import("./infrastructure/queue/queueManager");
+      await closeQueues();
+      const { incomingWorker } = await import("./infrastructure/queue/incomingWorker");
+      await incomingWorker.close();
+      const { outgoingWorker } = await import("./infrastructure/queue/outgoingWorker");
+      await outgoingWorker.close();
+    } catch (_e) {}
+    try {
+      const { closePool } = await import("./storage/db");
+      await closePool();
+    } catch (_e) {}
     process.exit(0);
   });
 
-  process.on("SIGINT", () => {
+  process.on("SIGINT", async () => {
     console.log("Received SIGINT, shutting down gracefully...");
+    await cleanupBotInstance();
+    try {
+      const { closeQueues } = await import("./infrastructure/queue/queueManager");
+      await closeQueues();
+      const { incomingWorker } = await import("./infrastructure/queue/incomingWorker");
+      await incomingWorker.close();
+      const { outgoingWorker } = await import("./infrastructure/queue/outgoingWorker");
+      await outgoingWorker.close();
+    } catch (_e) {}
+    try {
+      const { closePool } = await import("./storage/db");
+      await closePool();
+    } catch (_e) {}
     process.exit(0);
   });
 }
