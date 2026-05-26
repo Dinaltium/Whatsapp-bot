@@ -41,7 +41,10 @@ export function getPool(): Pool | null {
       connectionTimeoutMillis: Number(
         process.env.DB_CONNECT_TIMEOUT_MS || 30000,
       ),
-      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
+      // 120 s keeps connections alive through a QR scan (which can take 60s+).
+      // Without this, pg drops idle connections after 30 s and Neon has to
+      // cold-start again exactly when the handshake fires keys.set().
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 120000),
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
