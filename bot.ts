@@ -130,6 +130,7 @@ setInterval(
 );
 
 let isHealthServerStarted = false;
+let reconnectAttempts = 0;
 
 function startHealthServer(): void {
   if (isHealthServerStarted) {
@@ -566,6 +567,7 @@ async function startBot(): Promise<void> {
     }
 
     if (connection === "open") {
+      reconnectAttempts = 0; // reset on successful open
       logStructured({ event: "connection_open", service: "PARAG" });
     }
 
@@ -580,19 +582,37 @@ async function startBot(): Promise<void> {
 
       if (statusCode === 515) {
         logStructured({ event: "reconnecting", reason: "restart_required" });
-
         setTimeout(async () => {
           await cleanupBotInstance();
           startBot();
         }, 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
         logStructured({ event: "connection_logout" });
+        // Don't reconnect — session is gone, needs manual QR re-scan
       } else if (statusCode === DisconnectReason.connectionReplaced) {
         logStructured({ event: "connection_replaced", error: "another_instance" });
         await cleanupBotInstance();
         process.exit(0);
+      } else if (statusCode === 408) {
+        // 408 = session timeout / corrupted keys. Back off aggressively to
+        // avoid a crash loop that triggers Dokploy's container kill policy.
+        reconnectAttempts++;
+        if (reconnectAttempts > 3) {
+          logStructured({ event: "reconnect_aborted", reason: "too_many_408s", attempts: reconnectAttempts });
+          console.error("FATAL: Too many 408 disconnects — session may be corrupted. Clear wa_auth_state in Neon and redeploy.");
+          process.exit(1); // Let Dokploy restart cleanly rather than crash-looping
+        }
+        const delay = 15000 * reconnectAttempts; // 15s, 30s, 45s
+        logStructured({ event: "reconnecting", reason: "session_timeout_408", attempt: reconnectAttempts, delayMs: delay });
+        setTimeout(async () => {
+          await cleanupBotInstance();
+          startBot();
+        }, delay);
       } else {
-        logStructured({ event: "reconnecting", reason: "generic_close" });
+        // Generic disconnect — exponential backoff up to 60s
+        reconnectAttempts++;
+        const delay = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
+        logStructured({ event: "reconnecting", reason: "generic_close", attempt: reconnectAttempts, delayMs: delay });
 
         setTimeout(async () => {
           await cleanupBotInstance();
