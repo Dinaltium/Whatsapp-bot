@@ -45,6 +45,10 @@ export function getPool(): Pool | null {
       // Without this, pg drops idle connections after 30 s and Neon has to
       // cold-start again exactly when the handshake fires keys.set().
       idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 120000),
+      // TCP keepalive: sends OS-level probe packets on idle connections so
+      // Neon's serverless compute doesn't terminate them silently with a RST.
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000, // start probing after 10s idle
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false

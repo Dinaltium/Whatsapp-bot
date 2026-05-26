@@ -522,6 +522,16 @@ async function startBot(): Promise<void> {
   await chatConfig.init();
   console.log("Allowlists initialized.");
 
+  // Keep Neon's serverless compute alive while waiting for the QR scan.
+  // Without this, Neon suspends idle connections within ~60s, causing
+  // keys.get() to time out during the WhatsApp handshake and returning {}
+  // (missing keys), which leads to an immediate 408 disconnect.
+  const { getPool: _getPool } = await import("./storage/db");
+  const _heartbeatInterval = setInterval(() => {
+    const _pool = _getPool();
+    if (_pool) _pool.query("SELECT 1").catch(() => {});
+  }, 45000);
+
   // Boot BullMQ queue workers to start listening for jobs
   console.log("Initializing BullMQ queue workers...");
   await import("./infrastructure/queue/incomingWorker");
@@ -568,6 +578,7 @@ async function startBot(): Promise<void> {
 
     if (connection === "open") {
       reconnectAttempts = 0; // reset on successful open
+      clearInterval(_heartbeatInterval); // no longer need DB keepalive pings
       logStructured({ event: "connection_open", service: "PARAG" });
     }
 
