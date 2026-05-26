@@ -160,6 +160,36 @@ async function deleteMany(pool: Pool, ids: string[]): Promise<void> {
   ]);
 }
 
+/**
+ * Bulk-upsert all entries in a single query using unnest().
+ * This is critical for performance: during the WhatsApp handshake,
+ * keys.set() can be called with 100+ pre-keys simultaneously.
+ * Promise.all(N individual upserts) would exhaust a small pool instantly.
+ * One query with two unnest arrays is a single round-trip regardless of N.
+ */
+async function upsertMany(
+  pool: Pool,
+  entries: Array<{ id: string; value: StorageValue }>,
+): Promise<void> {
+  if (!entries.length) return;
+
+  const ids: string[] = [];
+  const encodedValues: string[] = [];
+
+  for (const { id, value } of entries) {
+    ids.push(id);
+    encodedValues.push(serializeStateValue(value));
+  }
+
+  await pool.query(
+    `INSERT INTO ${AUTH_TABLE} (id, value, updated_at)
+     SELECT unnest($1::text[]), unnest($2::text[]), NOW()
+     ON CONFLICT (id)
+     DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [ids, encodedValues],
+  );
+}
+
 async function readMany(
   pool: Pool,
   ids: string[],
@@ -231,22 +261,25 @@ async function useNeonAuthState(
   async function flushPendingWrites(): Promise<void> {
     if (!pendingWrites.size) return;
 
-    for (const [id, value] of Array.from(pendingWrites.entries())) {
-      try {
-        // handle deletions marked with null
-        if (value === null) {
-          await deleteMany(pool, [id]);
-          pendingWrites.delete(id);
-          continue;
-        }
+    const toUpsert: Array<{ id: string; value: StorageValue }> = [];
+    const toDelete: string[] = [];
 
-        await upsertOne(pool, id, value);
-        pendingWrites.delete(id);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`⚠️ Failed flushing pending auth write ${id}: ${message}`);
-        // keep remaining entries for next attempt
+    for (const [id, value] of pendingWrites.entries()) {
+      if (value === null) {
+        toDelete.push(id);
+      } else {
+        toUpsert.push({ id, value });
       }
+    }
+
+    try {
+      if (toUpsert.length) await upsertMany(pool, toUpsert);
+      if (toDelete.length) await deleteMany(pool, toDelete);
+      pendingWrites.clear();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`⚠️ Failed flushing pending auth writes: ${message}`);
+      // keep all entries — they'll be retried on the next flush interval
     }
 
     if (pendingWrites.size === 0 && flushTimer) {
@@ -294,33 +327,36 @@ async function useNeonAuthState(
         }
       },
       set: async (data: any) => {
-        try {
-          const writes: Promise<void>[] = [];
-          const deletions: string[] = [];
+        // Collect all writes first, then issue a SINGLE bulk upsert.
+        // Promise.all(N individual upserts) would saturate a small pool when
+        // WhatsApp sends 100+ pre-keys during the initial handshake.
+        const toUpsert: Array<{ id: string; value: StorageValue }> = [];
+        const deletions: string[] = [];
 
-          for (const [typeKey, typeData] of Object.entries(data)) {
-            for (const [id, value] of Object.entries(typeData as any)) {
-              const dbKey = buildStorageKey(namespace, "key", typeKey, id);
-              if (value) {
-                writes.push(upsertOne(pool, dbKey, value as StorageValue));
-              } else {
-                deletions.push(dbKey);
-              }
+        for (const [typeKey, typeData] of Object.entries(data)) {
+          for (const [id, value] of Object.entries(typeData as any)) {
+            const dbKey = buildStorageKey(namespace, "key", typeKey, id);
+            if (value) {
+              toUpsert.push({ id: dbKey, value: value as StorageValue });
+            } else {
+              deletions.push(dbKey);
             }
           }
+        }
 
-          if (writes.length) await Promise.all(writes);
+        try {
+          if (toUpsert.length) await upsertMany(pool, toUpsert);
           if (deletions.length) await deleteMany(pool, deletions);
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
           console.warn(`⚠️ Failed to persist auth keys to Neon: ${message}`);
-          for (const [typeKey, typeData] of Object.entries(data)) {
-            for (const [id, value] of Object.entries(typeData as any)) {
-              const dbKey = buildStorageKey(namespace, "key", typeKey, id);
-              if (value) pendingWrites.set(dbKey, value as StorageValue);
-              else pendingWrites.set(dbKey, null as any);
-            }
+          // Queue all failed writes for background retry
+          for (const { id, value } of toUpsert) {
+            pendingWrites.set(id, value);
+          }
+          for (const id of deletions) {
+            pendingWrites.set(id, null as any);
           }
           ensureFlushTimer();
         }
