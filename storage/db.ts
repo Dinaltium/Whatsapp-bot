@@ -34,8 +34,12 @@ export function getPool(): Pool | null {
   try {
     dbPool = new Pool({
       connectionString: dbUrl,
+      // Neon free tier allows ~5 concurrent connections; keep pool small to
+      // avoid exhaustion when auth store + app pool both connect on cold start.
+      max: Number(process.env.DB_POOL_MAX || 3),
+      // 30 s gives Neon time to wake from cold start before giving up.
       connectionTimeoutMillis: Number(
-        process.env.DB_CONNECT_TIMEOUT_MS || 10000,
+        process.env.DB_CONNECT_TIMEOUT_MS || 30000,
       ),
       idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
       ssl:
@@ -58,6 +62,32 @@ export function getPool(): Pool | null {
     console.error("⚠️ Failed to initialize dbPool:", error);
     return null;
   }
+}
+
+/**
+ * Actively warm the pool by running a trivial query.
+ * Call this before initialising the WhatsApp socket so Neon has a live
+ * connection ready when the first `keys.set()` fires during the handshake.
+ */
+export async function warmPool(retries = 5, delayMs = 3000): Promise<void> {
+  const pool = getPool();
+  if (!pool) return;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await pool.query("SELECT 1");
+      console.log("Database pool warmed successfully.");
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`⚠️ DB warm attempt ${attempt}/${retries} failed: ${msg}`);
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  // Non-fatal — bot can still try; the write-queue will retry on failure.
+  console.warn("⚠️ Could not warm DB pool after all retries. Continuing anyway.");
 }
 
 

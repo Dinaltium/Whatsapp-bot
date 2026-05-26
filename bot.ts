@@ -486,7 +486,7 @@ async function startBot(): Promise<void> {
 
   if (databaseUrl) {
     try {
-      const { ensureSchema, getPool } = await import("./storage/db");
+      const { ensureSchema, getPool, warmPool } = await import("./storage/db");
       const sharedPool = getPool();
       if (!sharedPool) {
         throw new Error("Failed to initialize database pool");
@@ -498,6 +498,12 @@ async function startBot(): Promise<void> {
 
       // Bootstrap PostgreSQL schemas
       await ensureSchema();
+
+      // Warm the connection pool BEFORE starting the WhatsApp socket.
+      // Neon (serverless Postgres) cold-starts slowly; if the pool isn't
+      // ready when WhatsApp fires keys.set() during the handshake, the
+      // write times out and WhatsApp drops the connection with 408.
+      await warmPool();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`FATAL: Neon auth storage unavailable (${message}).`);
