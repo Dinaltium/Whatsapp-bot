@@ -233,10 +233,18 @@ async function useNeonAuthState(
       );
     }
 
+    // Dedicated pool just for auth state — isolated from the app pool so that
+    // long-running app queries (allowlist loads, schema migrations, etc.) can
+    // never starve the auth pool during the WhatsApp handshake.
     pool = new Pool({
       connectionString: databaseUrl,
-      connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
-      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
+      max: 1, // auth state is sequential; one connection is enough
+      connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 30000),
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 120000),
+      // TCP keepalive prevents Neon from silently terminating idle connections
+      // between bot restarts and the WhatsApp handshake.
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false

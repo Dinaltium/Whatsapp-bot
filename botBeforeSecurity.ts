@@ -83,34 +83,6 @@ const lastSentMessages = new Map<string, string>();
 const lastUserMessages = new Map<string, string>();
 const lastGroupInteractionTime = new Map<string, number>();
 
-import {
-  getActiveSocket as getClientSocket,
-  setActiveSocket,
-  cleanupBotInstance as cleanupClientInstance
-} from "./infrastructure/whatsapp/whatsappClient";
-
-let activeAuthStore: any = null;
-
-export function getActiveSocket(): any {
-  return getClientSocket();
-}
-
-export async function cleanupBotInstance(): Promise<void> {
-  await cleanupClientInstance();
-
-  if (activeAuthStore) {
-    try {
-      if (activeAuthStore.close) {
-        await activeAuthStore.close();
-      }
-    } catch (e) {
-      console.warn("Error closing active auth store:", e);
-    }
-    activeAuthStore = null;
-  }
-}
-
-
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
 // Key: normalized sender JID.  Value: { group JID, timestamp }
@@ -130,7 +102,6 @@ setInterval(
 );
 
 let isHealthServerStarted = false;
-let reconnectAttempts = 0;
 
 function startHealthServer(): void {
   if (isHealthServerStarted) {
@@ -177,17 +148,37 @@ export async function sendBotReply(
   text: string,
 ): Promise<void> {
   try {
-    const trimmedText = String(text || "").trim();
-    if (!trimmedText) return;
-    
-    lastSentMessages.set(to, trimmedText);
-    
-    const { outgoingQueue } = await import("./infrastructure/queue/queueManager");
-    await outgoingQueue.add("send-reply", { to, text: trimmedText });
-    console.log(`[bot.ts] Reply queued for asynchronous dispatch to ${to}`);
+    // Notify composing/typing presence
+    await sock.sendPresenceUpdate("composing", to);
   } catch (err) {
-    console.error("Failed to queue reply:", err);
+    console.error("Failed to send presence update:", err);
   }
+
+  // Calculate dynamic delay based on length of response to look highly natural
+  const textLength = String(text || "").length;
+  const baseDelay = Math.floor(Math.random() * 1500) + 1200; // 1200ms to 2700ms base (reading/thinking delay)
+  const charDelay = textLength * 20; // 20ms per character of typing speed
+  let totalDelay = baseDelay + charDelay;
+
+  // Cap total typing duration at 20-30 seconds (randomized ceiling)
+  const maxDelayCap = Math.floor(Math.random() * 10000) + 20000; // 20000ms to 30000ms
+  if (totalDelay > maxDelayCap) {
+    totalDelay = maxDelayCap;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, totalDelay));
+
+  try {
+    // Notify paused presence before sending message
+    await sock.sendPresenceUpdate("paused", to);
+  } catch (err) {}
+
+  const trimmedText = String(text || "").trim();
+  lastSentMessages.set(to, trimmedText);
+
+  await sock.sendMessage(to, {
+    text: trimmedText,
+  });
 }
 
 export function extractMessageText(
@@ -483,28 +474,18 @@ async function startBot(): Promise<void> {
   }
 
   const databaseUrl = getDatabaseUrl();
-  let authStore: any;
+  let authStore:
+    | Awaited<ReturnType<typeof useNeonAuthState>>
+    | Awaited<ReturnType<typeof useMultiFileAuthState>>;
 
   if (databaseUrl) {
     try {
-      const { ensureSchema, getPool, warmPool } = await import("./storage/db");
-      const sharedPool = getPool();
-      if (!sharedPool) {
-        throw new Error("Failed to initialize database pool");
-      }
-
-      authStore = await useNeonAuthState("parag"); // dedicated pool — not shared
-      activeAuthStore = authStore;
-      console.log("Using Neon PostgreSQL for auth state storage (dedicated pool).");
+      authStore = await useNeonAuthState("parag");
+      console.log("Using Neon PostgreSQL for auth state storage.");
 
       // Bootstrap PostgreSQL schemas
+      const { ensureSchema } = await import("./storage/db");
       await ensureSchema();
-
-      // Warm the connection pool BEFORE starting the WhatsApp socket.
-      // Neon (serverless Postgres) cold-starts slowly; if the pool isn't
-      // ready when WhatsApp fires keys.set() during the handshake, the
-      // write times out and WhatsApp drops the connection with 408.
-      await warmPool();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`FATAL: Neon auth storage unavailable (${message}).`);
@@ -522,22 +503,6 @@ async function startBot(): Promise<void> {
   await chatConfig.init();
   console.log("Allowlists initialized.");
 
-  // Keep Neon's serverless compute alive while waiting for the QR scan.
-  // Without this, Neon suspends idle connections within ~60s, causing
-  // keys.get() to time out during the WhatsApp handshake and returning {}
-  // (missing keys), which leads to an immediate 408 disconnect.
-  const { getPool: _getPool } = await import("./storage/db");
-  const _heartbeatInterval = setInterval(() => {
-    const _pool = _getPool();
-    if (_pool) _pool.query("SELECT 1").catch(() => {});
-  }, 45000);
-
-  // Boot BullMQ queue workers to start listening for jobs
-  console.log("Initializing BullMQ queue workers...");
-  await import("./infrastructure/queue/incomingWorker");
-  await import("./infrastructure/queue/outgoingWorker");
-  console.log("BullMQ queue workers initialized and listening.");
-
   const { state, saveCreds } = authStore;
 
   const { version } = await fetchLatestBaileysVersion();
@@ -550,7 +515,6 @@ async function startBot(): Promise<void> {
     }),
     browser: ["Ubuntu", "Chrome", "22.04.4"],
   });
-  setActiveSocket(sock);
 
   sock.ev.on("creds.update", async () => {
     try {
@@ -577,8 +541,6 @@ async function startBot(): Promise<void> {
     }
 
     if (connection === "open") {
-      reconnectAttempts = 0; // reset on successful open
-      clearInterval(_heartbeatInterval); // no longer need DB keepalive pings
       logStructured({ event: "connection_open", service: "PARAG" });
     }
 
@@ -593,40 +555,19 @@ async function startBot(): Promise<void> {
 
       if (statusCode === 515) {
         logStructured({ event: "reconnecting", reason: "restart_required" });
-        setTimeout(async () => {
-          await cleanupBotInstance();
+
+        setTimeout(() => {
           startBot();
         }, 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
         logStructured({ event: "connection_logout" });
-        // Don't reconnect — session is gone, needs manual QR re-scan
       } else if (statusCode === DisconnectReason.connectionReplaced) {
         logStructured({ event: "connection_replaced", error: "another_instance" });
-        await cleanupBotInstance();
         process.exit(0);
-      } else if (statusCode === 408) {
-        // 408 = session timeout / corrupted keys. Back off aggressively to
-        // avoid a crash loop that triggers Dokploy's container kill policy.
-        reconnectAttempts++;
-        if (reconnectAttempts > 3) {
-          logStructured({ event: "reconnect_aborted", reason: "too_many_408s", attempts: reconnectAttempts });
-          console.error("FATAL: Too many 408 disconnects — session may be corrupted. Clear wa_auth_state in Neon and redeploy.");
-          process.exit(1); // Let Dokploy restart cleanly rather than crash-looping
-        }
-        const delay = 15000 * reconnectAttempts; // 15s, 30s, 45s
-        logStructured({ event: "reconnecting", reason: "session_timeout_408", attempt: reconnectAttempts, delayMs: delay });
-        setTimeout(async () => {
-          await cleanupBotInstance();
-          startBot();
-        }, delay);
       } else {
-        // Generic disconnect — exponential backoff up to 60s
-        reconnectAttempts++;
-        const delay = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
-        logStructured({ event: "reconnecting", reason: "generic_close", attempt: reconnectAttempts, delayMs: delay });
+        logStructured({ event: "reconnecting", reason: "generic_close" });
 
-        setTimeout(async () => {
-          await cleanupBotInstance();
+        setTimeout(() => {
           startBot();
         }, 3000);
       }
@@ -767,55 +708,24 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     try {
-        const { incomingQueue } = await import("./infrastructure/queue/queueManager");
-        await incomingQueue.add("upsert-message", { messages, type });
-        logStructured({
-          event: "messages_queued",
-          count: messages.length,
-          type,
-        });
+        const { handleMessageUpsert } = await import("./core/messageRouter");
+        await handleMessageUpsert(sock, messages, type);
     } catch (err) {
-        console.error("Error queueing incoming messages:", err);
+        console.error("Error in message router:", err);
     }
-  });
+});
 
   // Handle graceful shutdown for hosting environments like Render
   process.removeAllListeners("SIGTERM");
   process.removeAllListeners("SIGINT");
 
-  process.on("SIGTERM", async () => {
+  process.on("SIGTERM", () => {
     console.log("Received SIGTERM, shutting down gracefully...");
-    await cleanupBotInstance();
-    try {
-      const { closeQueues } = await import("./infrastructure/queue/queueManager");
-      await closeQueues();
-      const { incomingWorker } = await import("./infrastructure/queue/incomingWorker");
-      await incomingWorker.close();
-      const { outgoingWorker } = await import("./infrastructure/queue/outgoingWorker");
-      await outgoingWorker.close();
-    } catch (_e) {}
-    try {
-      const { closePool } = await import("./storage/db");
-      await closePool();
-    } catch (_e) {}
     process.exit(0);
   });
 
-  process.on("SIGINT", async () => {
+  process.on("SIGINT", () => {
     console.log("Received SIGINT, shutting down gracefully...");
-    await cleanupBotInstance();
-    try {
-      const { closeQueues } = await import("./infrastructure/queue/queueManager");
-      await closeQueues();
-      const { incomingWorker } = await import("./infrastructure/queue/incomingWorker");
-      await incomingWorker.close();
-      const { outgoingWorker } = await import("./infrastructure/queue/outgoingWorker");
-      await outgoingWorker.close();
-    } catch (_e) {}
-    try {
-      const { closePool } = await import("./storage/db");
-      await closePool();
-    } catch (_e) {}
     process.exit(0);
   });
 }
