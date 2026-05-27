@@ -132,6 +132,13 @@ setInterval(
 let isHealthServerStarted = false;
 let reconnectAttempts = 0;
 
+// Persistent auth store singleton — survives across startBot() reconnect cycles.
+// This is critical: if Neon fails to save the QR session credentials (due to
+// timeouts), re-creating the auth store re-reads stale/corrupted creds from Neon.
+// By reusing the same store, the in-memory creds are always the latest valid
+// state regardless of whether Neon persisted them successfully.
+let persistentAuthStore: Awaited<ReturnType<typeof useNeonAuthState>> | null = null;
+
 function startHealthServer(): void {
   if (isHealthServerStarted) {
     return;
@@ -493,17 +500,24 @@ async function startBot(): Promise<void> {
         throw new Error("Failed to initialize database pool");
       }
 
-      authStore = await useNeonAuthState("parag"); // dedicated pool — not shared
+      if (!persistentAuthStore) {
+        // First boot — create the auth store and load creds from Neon.
+        persistentAuthStore = await useNeonAuthState("parag");
+        console.log("Using Neon PostgreSQL for auth state storage (dedicated pool).");
+
+        // Bootstrap PostgreSQL schemas on first boot only.
+        await ensureSchema();
+      } else {
+        // Reconnect — reuse the existing auth store.
+        // The in-memory creds from the last QR scan / connection are preserved
+        // here even if Neon failed to persist them, avoiding a stale-creds 408.
+        console.log("Reusing existing auth store (in-memory creds preserved).");
+      }
+
+      authStore = persistentAuthStore;
       activeAuthStore = authStore;
-      console.log("Using Neon PostgreSQL for auth state storage (dedicated pool).");
 
-      // Bootstrap PostgreSQL schemas
-      await ensureSchema();
-
-      // Warm the connection pool BEFORE starting the WhatsApp socket.
-      // Neon (serverless Postgres) cold-starts slowly; if the pool isn't
-      // ready when WhatsApp fires keys.set() during the handshake, the
-      // write times out and WhatsApp drops the connection with 408.
+      // Warm the app pool before starting the socket.
       await warmPool();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -786,6 +800,7 @@ async function startBot(): Promise<void> {
   process.on("SIGTERM", async () => {
     console.log("Received SIGTERM, shutting down gracefully...");
     await cleanupBotInstance();
+    try { if (persistentAuthStore?.close) await persistentAuthStore.close(); } catch (_e) {}
     try {
       const { closeQueues } = await import("./infrastructure/queue/queueManager");
       await closeQueues();
@@ -804,6 +819,7 @@ async function startBot(): Promise<void> {
   process.on("SIGINT", async () => {
     console.log("Received SIGINT, shutting down gracefully...");
     await cleanupBotInstance();
+    try { if (persistentAuthStore?.close) await persistentAuthStore.close(); } catch (_e) {}
     try {
       const { closeQueues } = await import("./infrastructure/queue/queueManager");
       await closeQueues();
