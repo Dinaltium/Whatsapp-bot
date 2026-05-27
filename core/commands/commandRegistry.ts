@@ -10,6 +10,7 @@ export interface CommandContext {
   senderId: string;
   from: string;
   session: any;
+  majesticMode?: 'private' | 'public_silent' | 'public_shazam';
 }
 
 export type CommandHandler = (ctx: CommandContext) => Promise<void>;
@@ -35,8 +36,23 @@ export function registerCommand(config: CommandConfig) {
 }
 
 export async function dispatchCommand(ctx: CommandContext): Promise<boolean> {
-  const config = getRegistry().get(ctx.cmdName.toLowerCase());
+  let lookupName = ctx.cmdName.toLowerCase();
+  let majesticMode: 'private' | 'public_silent' | 'public_shazam' = 'private';
+
+  if (lookupName === 'reveal') {
+    majesticMode = 'private';
+  } else if (/^reveal!+$/.test(lookupName) || lookupName === 'revealthis!') {
+    majesticMode = 'public_silent';
+    lookupName = 'reveal';
+  } else if (lookupName === 'thepowerofwhatsappinmyhands!') {
+    majesticMode = 'public_shazam';
+    lookupName = 'reveal';
+  }
+
+  const config = getRegistry().get(lookupName);
   if (!config) return false;
+
+  ctx.majesticMode = majesticMode;
 
   // ── MIDDLEWARE ACCESS CHECKS ──
   if (config.requiresAdmin && !isAdminAction(ctx.msg, ctx.senderId)) {

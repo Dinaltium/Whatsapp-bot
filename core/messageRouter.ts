@@ -649,7 +649,10 @@ export async function handleMessageUpsert(
           "clubs", "club", "events", "event", "mentors", "mentor", "next", "page",
           "addmentor", "editmentor", "delmentor"
         ];
-        const isStaticCommand = staticCommands.includes(cmdName);
+        let isStaticCommand = staticCommands.includes(cmdName);
+        if (/^reveal!+$/.test(cmdName) || cmdName === "revealthis!" || cmdName === "thepowerofwhatsappinmyhands!") {
+          isStaticCommand = true;
+        }
 
         const isAdmin = isAdminSender(msg, senderId);
 

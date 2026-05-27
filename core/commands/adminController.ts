@@ -942,7 +942,8 @@ registerCommand({
       return;
     }
 
-    const targetPrivateJid = ctx.senderId || ctx.from || "";
+    const mode = ctx.majesticMode || "private";
+    const destinationJid = mode === "private" ? (ctx.senderId || ctx.from) : ctx.from;
 
     try {
       const buffer = await downloadMediaMessage(
@@ -951,49 +952,59 @@ registerCommand({
         {}
       ) as Buffer;
 
+      let caption: string | undefined = undefined;
+      if (mode === "public_shazam") {
+        caption = "SHAZAAAAAM!!!";
+      }
+
       if (imageInfo) {
-        await ctx.sock.sendMessage(targetPrivateJid, {
+        await ctx.sock.sendMessage(destinationJid, {
           image: buffer,
-          caption: isViewOnce ? "🔓 Revealed View Once Photo!" : "Decrypted Photo!"
+          caption
         });
       } else if (videoInfo) {
-        await ctx.sock.sendMessage(targetPrivateJid, {
+        await ctx.sock.sendMessage(destinationJid, {
           video: buffer,
-          caption: isViewOnce ? "🔓 Revealed View Once Video!" : "Decrypted Video!"
+          caption
         });
       } else if (audioInfo) {
-        await ctx.sock.sendMessage(targetPrivateJid, {
+        await ctx.sock.sendMessage(destinationJid, {
           audio: buffer,
           mimetype: audioInfo.mimetype || "audio/mp4",
           ptt: audioInfo.ptt || false
         });
       } else if (docInfo) {
-        await ctx.sock.sendMessage(targetPrivateJid, {
+        await ctx.sock.sendMessage(destinationJid, {
           document: buffer,
           mimetype: docInfo.mimetype || "application/octet-stream",
           fileName: docInfo.fileName || "revealed_file"
         });
       }
 
-      await sendBotReply(
-        ctx.sock,
-        ctx.from,
-        `🔓 Decrypted and sent the ${sourceLabel} privately to your DM. Check your private chat!`
-      );
+      // Only send a follow-up reply if it's not a private or public silent command
+      if (mode !== "private" && mode !== "public_silent" && mode !== "public_shazam") {
+        await sendBotReply(
+          ctx.sock,
+          ctx.from,
+          `🔓 Decrypted and sent the ${sourceLabel} privately to your DM. Check your private chat!`
+        );
+      }
 
     } catch (err) {
       console.error("Failed to decrypt view-once media:", err);
-      try {
-        await ctx.sock.sendMessage(targetPrivateJid, {
-          text: `⚠️ Error: The view-once media could not be decrypted or downloaded. It may have expired, already been viewed, or been deleted from the WhatsApp servers.`
-        });
-      } catch (_) {}
+      if (mode !== "private" && mode !== "public_silent") {
+        try {
+          await ctx.sock.sendMessage(destinationJid, {
+            text: `⚠️ Error: The view-once media could not be decrypted or downloaded. It may have expired, already been viewed, or been deleted from the WhatsApp servers.`
+          });
+        } catch (_) {}
 
-      await sendBotReply(
-        ctx.sock,
-        ctx.from,
-        "⚠️ Failed to reveal media. A direct message explaining the error has been sent to your private chat."
-      );
+        await sendBotReply(
+          ctx.sock,
+          ctx.from,
+          "⚠️ Failed to reveal media."
+        );
+      }
     }
   }
 });
