@@ -51,7 +51,7 @@ registerCommand({
     if (!list || list.length === 0) {
       await sendBotReply(ctx.sock, ctx.from, "No chats configured (allowlist is empty).");
     } else {
-      const formatted = list.map((entry) => {
+      const formattedPromises = list.map(async (entry) => {
         const botLabel =
           entry.botNumber === 1
             ? "ECB"
@@ -59,8 +59,10 @@ registerCommand({
               ? "DKB"
               : "PARAG";
         const statusLabel = entry.enabled ? "Enabled" : "Disabled";
-        return `${entry.id}. ${entry.jid} | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
+        const name = await redis.hget("contact_names", entry.jid) || "Unknown User";
+        return `${entry.id}. ${name} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
       });
+      const formatted = await Promise.all(formattedPromises);
       await sendBotReply(ctx.sock, ctx.from, `Allowed chats:\n${formatted.join("\n")}`);
     }
   }
@@ -234,12 +236,13 @@ registerCommand({
       botNumber: chatEntry.botNumber,
     };
 
+    const name = await redis.hget("contact_names", chatEntry.jid) || "Unknown User";
     const botLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
 
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to remove Chat ID: ${chatId} | JID: ${chatEntry.jid} | Bot: ${chatEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
+      `Are you sure you want to remove Chat ID: ${chatId} | Name: ${name} | JID: ${chatEntry.jid} | Bot: ${chatEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
     );
 
     const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
@@ -335,13 +338,14 @@ registerCommand({
       botNumber: newBotNumber,
     };
 
+    const name = await redis.hget("contact_names", chatEntry.jid) || "Unknown User";
     const oldBotLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
     const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : "PARAG";
 
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to change Chat ID: ${chatId} | JID: ${chatEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${chatEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
+      `Are you sure you want to change Chat ID: ${chatId} | Name: ${name} | JID: ${chatEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${chatEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
     );
 
     const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
@@ -502,6 +506,52 @@ registerCommand({
       const msg = err instanceof Error ? err.message : String(err);
       await sendBotReply(ctx.sock, ctx.from, `Failed to fetch groups:\n${msg}`);
     }
+  }
+});
+
+// ── FIND CHATS ──
+registerCommand({
+  name: "findchats",
+  requiresAdmin: true,
+  handler: async (ctx) => {
+    try {
+      const query = ctx.cmdArgs.join(" ").trim().toLowerCase();
+      if (!query) {
+        await sendBotReply(ctx.sock, ctx.from, "Usage: !findchats <name-or-jid-keyword>");
+        return;
+      }
+
+      const allContacts = await redis.hgetall("contact_names");
+      if (!allContacts || Object.keys(allContacts).length === 0) {
+        await sendBotReply(ctx.sock, ctx.from, "No cached contacts found in the database yet.");
+        return;
+      }
+
+      const matches = Object.entries(allContacts)
+        .filter(([jid, name]) => {
+          return jid.toLowerCase().includes(query) || name.toLowerCase().includes(query);
+        })
+        .slice(0, 30);
+
+      if (matches.length === 0) {
+        await sendBotReply(ctx.sock, ctx.from, `No cached contacts matched your query: "${query}"`);
+      } else {
+        const formatted = matches.map(([jid, name], idx) => `${idx + 1}. ${name} | JID: ${jid}`);
+        await sendBotReply(ctx.sock, ctx.from, `Matching chats found in cache:\n${formatted.join("\n")}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendBotReply(ctx.sock, ctx.from, `Failed to search chats:\n${msg}`);
+    }
+  }
+});
+
+registerCommand({
+  name: "findchat",
+  requiresAdmin: true,
+  handler: async (ctx) => {
+    const registry = (await import("./commandRegistry")).dispatchCommand;
+    await registry({ ...ctx, cmdName: "findchats" });
   }
 });
 

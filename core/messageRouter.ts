@@ -221,6 +221,10 @@ export async function handleMessageUpsert(
         }
       }
 
+      if (msg.pushName && senderId) {
+        await redis.hset("contact_names", senderId, msg.pushName);
+      }
+
       if (text) {
         await setLastUserMessage(`${from}:${senderId}`, text);
       }
@@ -455,10 +459,11 @@ export async function handleMessageUpsert(
               pending.jid,
               JSON.stringify({ jid: pending.jid, botNumber: pending.botNumber })
             );
+            const name = await redis.hget("contact_names", pending.jid) || "Unknown User";
             await sendBotReply(
               sock,
               from || "",
-              `Successfully removed Chat ID: ${pending.id} | JID: ${pending.jid} from the allowlist.`
+              `Successfully removed Chat ID: ${pending.id} | Name: ${name} | JID: ${pending.jid} from the allowlist.`
             );
           } else {
             await sendBotReply(
@@ -534,10 +539,11 @@ export async function handleMessageUpsert(
               pending.jid,
               JSON.stringify({ botNumber: pending.botNumber })
             );
+            const name = await redis.hget("contact_names", pending.jid) || "Unknown User";
             await sendBotReply(
               sock,
               from || "",
-              `Changed Chat ID: ${pending.id} to use Bot ${pending.botNumber}.`
+              `Changed Chat ID: ${pending.id} | Name: ${name} to use Bot ${pending.botNumber}.`
             );
           } else {
             await sendBotReply(
