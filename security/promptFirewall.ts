@@ -32,6 +32,22 @@ export async function hasPromptInjection(
   if (trimmed.length < 10 && !trimmed.startsWith("!")) {
     return false;
   }
+
+  // 1b. Dynamic fast-pass: if the query is explicitly about events, clubs, or mentors, 
+  // and doesn't contain obvious injection commands, bypass the LLM check to save latency.
+  const eventKeywords = /\b(?:hackfest|hacktofuture|hackathon|event|events|club|clubs|mentor|mentors|community|communities|college|colleges|summit)\b/i;
+  const obviousInjectionPatterns = [
+    /ignore\s+(?:all\s+)?(?:previous\s+)?(?:instructions|directives|rules|guidelines|guardrails|prompts)/i,
+    /system\s+prompt/i,
+    /bypass\s+(?:the\s+)?(?:guardrails|rules|system|security)/i,
+    /you\s+must\s+now/i,
+    /disregard\s+prior/i,
+    /override\s+instructions/i,
+    /acting\s+as\s+an?/i,
+  ];
+  if (eventKeywords.test(lower) && !obviousInjectionPatterns.some((p) => p.test(lower))) {
+    return false;
+  }
   
   // Reject zero-width spaces or hidden unicode separators used for regex obfuscation
   if (/[\u200b-\u200d\ufeff]/g.test(input)) {
