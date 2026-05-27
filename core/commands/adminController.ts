@@ -494,9 +494,9 @@ registerCommand({
           return { g, lastTime };
         }));
         listWithTime.sort((a, b) => b.lastTime - a.lastTime);
-        const top15 = listWithTime.slice(0, 15).map(item => item.g);
-        const formatted = top15.map((g: any, idx) => `${idx + 1}. ${g.subject} | JID: ${g.id}`);
-        await sendBotReply(ctx.sock, ctx.from, `Groups the bot is in (top 15 sorted by recent interaction):\n${formatted.join("\n")}`);
+        const top20 = listWithTime.slice(0, 20).map(item => item.g);
+        const formatted = top20.map((g: any, idx) => `${idx + 1}. ${g.subject} | JID: ${g.id}`);
+        await sendBotReply(ctx.sock, ctx.from, `Groups the bot is in:\n${formatted.join("\n")}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
