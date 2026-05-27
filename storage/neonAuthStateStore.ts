@@ -68,7 +68,7 @@ async function upsertMany(
 
   const values = writes.map((w) => [w.id, serializeStateValue(w.value)]);
   const query = format(
-    `INSERT INTO ${AUTH_TABLE} (id, value, updated_at) 
+    `INSERT INTO ${AUTH_TABLE} (id, value) 
      VALUES %L 
      ON CONFLICT (id) DO UPDATE SET 
        value = EXCLUDED.value, 
