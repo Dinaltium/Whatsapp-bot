@@ -362,8 +362,9 @@ export async function shouldSkipMessage(
     return true;
   }
 
-  // Only verify allowlists if the command is not publicExempt and not an adminOnlyCommand
+  // Only verify allowlists if the sender is not an admin, and the command is not publicExempt or adminOnly
   if (
+    !isAdmin &&
     !publicExemptCommands.includes(commandName) &&
     !adminOnlyCommands.includes(commandName)
   ) {
