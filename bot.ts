@@ -461,6 +461,8 @@ export function addSessionMessage(
   }
 }
 
+let persistentAuthStore: any = null;
+
 async function startBot(): Promise<void> {
   printBanner();
   startHealthServer();
@@ -475,18 +477,19 @@ async function startBot(): Promise<void> {
   }
 
   const databaseUrl = getDatabaseUrl();
-  let authStore:
-    | Awaited<ReturnType<typeof useNeonAuthState>>
-    | Awaited<ReturnType<typeof useMultiFileAuthState>>;
+  let authStore: any;
 
   if (databaseUrl) {
     try {
-      authStore = await useNeonAuthState("parag");
-      console.log("Using Neon PostgreSQL for auth state storage.");
-
-      // Bootstrap PostgreSQL schemas
-      const { ensureSchema } = await import("./storage/db");
-      await ensureSchema();
+      if (!persistentAuthStore) {
+        persistentAuthStore = await useNeonAuthState("parag");
+        console.log("Using Neon PostgreSQL for auth state storage.");
+        const { ensureSchema } = await import("./storage/db");
+        await ensureSchema();
+      } else {
+        console.log("Reusing existing auth store for reconnect.");
+      }
+      authStore = persistentAuthStore;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`FATAL: Neon auth storage unavailable (${message}).`);
@@ -554,13 +557,17 @@ async function startBot(): Promise<void> {
         event: "connection_closed",
         statusCode,
       });
+      
+      // Stop the old socket so it doesn't leak
+      try {
+        if (activeSocket) {
+            activeSocket.ws?.close();
+        }
+      } catch (e) {}
 
       if (statusCode === 515) {
         logStructured({ event: "reconnecting", reason: "restart_required" });
-
-        setTimeout(() => {
-          startBot();
-        }, 3000);
+        setTimeout(() => startBot(), 3000);
       } else if (statusCode === DisconnectReason.loggedOut) {
         logStructured({ event: "connection_logout" });
       } else if (statusCode === DisconnectReason.connectionReplaced) {
@@ -568,10 +575,7 @@ async function startBot(): Promise<void> {
         process.exit(0);
       } else {
         logStructured({ event: "reconnecting", reason: "generic_close" });
-
-        setTimeout(() => {
-          startBot();
-        }, 3000);
+        setTimeout(() => startBot(), 5000);
       }
     }
   });

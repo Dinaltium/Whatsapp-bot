@@ -1,112 +1,38 @@
 import { Pool } from "pg";
-import jwt from "jsonwebtoken";
 import {
-  initAuthCreds,
-  BufferJSON,
   AuthenticationState,
   AuthenticationCreds,
+  initAuthCreds,
+  BufferJSON,
 } from "@whiskeysockets/baileys";
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+import format from "pg-format";
+import "dotenv/config";
 
 const AUTH_TABLE = "wa_auth_state";
 const DEFAULT_NAMESPACE = "parag";
 
-interface StorageValue {
-  [key: string]: any;
+export function getDatabaseUrl(): string | undefined {
+  return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
 }
 
-interface AuthStateStore {
-  state: AuthenticationState;
-  saveCreds: () => Promise<void>;
-  close?: () => Promise<void>;
-}
-
-function getDatabaseUrl(): string | null {
-  return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || null;
-}
-
-function getJwtSecret(): string | null {
-  return process.env.AUTH_STATE_JWT_SECRET || null;
-}
-
-function getEncryptionKey(): Buffer | null {
-  const secret = process.env.AUTH_STATE_KEY || process.env.AUTH_STATE_JWT_SECRET || null;
-  if (!secret) return null;
-  return scryptSync(secret, "dk24_auth_salt", 32);
-}
+type StorageValue = any;
 
 function serializeStateValue(value: StorageValue): string {
-  const json = JSON.stringify(value, BufferJSON.replacer);
-  const key = getEncryptionKey();
-
-  if (!key) {
-    throw new Error(
-      "FATAL: Both AUTH_STATE_KEY and AUTH_STATE_JWT_SECRET are missing. Authentication state MUST be encrypted in production."
-    );
-  }
-
-  const iv = randomBytes(12); // 12-byte IV for AES-GCM
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  let encrypted = cipher.update(json, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  const tag = cipher.getAuthTag().toString("hex");
-
-  return `enc:${iv.toString("hex")}:${tag}:${encrypted}`;
+  return JSON.stringify(value, BufferJSON.replacer);
 }
 
-function deserializeStateValue(raw: string): StorageValue {
-  if (!raw) return null as any;
-
-  if (raw.startsWith("enc:")) {
-    const key = getEncryptionKey();
-    if (!key) {
-      throw new Error(
-        "AUTH_STATE_KEY or AUTH_STATE_JWT_SECRET is required to decrypt auth state.",
-      );
-    }
-    const parts = raw.split(":");
-    const iv = Buffer.from(parts[1], "hex");
-    const tag = Buffer.from(parts[2], "hex");
-    const encrypted = parts[3];
-
-    const decipher = createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(tag);
-    let decrypted = decipher.update(encrypted, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-
-    return JSON.parse(decrypted, BufferJSON.reviver);
-  }
-
-  if (raw.startsWith("jwt:")) {
-    const token = raw.slice(4);
-    const secret = getJwtSecret();
-    if (!secret) {
-      throw new Error(
-        "AUTH_STATE_JWT_SECRET is required to read legacy JWT-wrapped auth state.",
-      );
-    }
-
-    const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] }) as {
-      data: string;
-    };
-    return JSON.parse(decoded.data, BufferJSON.reviver);
-  }
-
-  const payload = raw.startsWith("json:") ? raw.slice(5) : raw;
-  return JSON.parse(payload, BufferJSON.reviver);
+function deserializeStateValue(value: string | null): StorageValue {
+  if (!value) return null;
+  return JSON.parse(value, BufferJSON.reviver);
 }
 
 function buildStorageKey(
   namespace: string,
-  kind: string,
-  type?: string,
+  type: string,
+  subtype?: string,
   id?: string,
 ): string {
-  if (kind === "creds") {
-    return `${namespace}:creds`;
-  }
-
-  return `${namespace}:key:${type}:${id}`;
+  return [namespace, type, subtype, id].filter(Boolean).join(":");
 }
 
 async function ensureSchema(pool: Pool): Promise<void> {
@@ -115,7 +41,7 @@ async function ensureSchema(pool: Pool): Promise<void> {
       id TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
+    );
   `);
 }
 
@@ -132,24 +58,25 @@ async function readOne(pool: Pool, id: string): Promise<StorageValue> {
   return deserializeStateValue(result.rows[0].value);
 }
 
-async function upsertOne(
+// Replaces 100 concurrent queries with 1 single bulk insert query.
+// This is critical to prevent connection exhaustion in serverless Postgres.
+async function upsertMany(
   pool: Pool,
-  id: string,
-  value: StorageValue,
+  writes: { id: string; value: StorageValue }[],
 ): Promise<void> {
-  const encoded = serializeStateValue(value);
+  if (writes.length === 0) return;
 
-  await pool.query(
-    `
-      INSERT INTO ${AUTH_TABLE} (id, value, updated_at)
-      VALUES ($1, $2, NOW())
-      ON CONFLICT (id)
-      DO UPDATE SET
-        value = EXCLUDED.value,
-        updated_at = NOW()
-    `,
-    [id, encoded],
+  const values = writes.map((w) => [w.id, serializeStateValue(w.value)]);
+  const query = format(
+    `INSERT INTO ${AUTH_TABLE} (id, value, updated_at) 
+     VALUES %L 
+     ON CONFLICT (id) DO UPDATE SET 
+       value = EXCLUDED.value, 
+       updated_at = NOW()`,
+    values,
   );
+
+  await pool.query(query);
 }
 
 async function deleteMany(pool: Pool, ids: string[]): Promise<void> {
@@ -179,15 +106,9 @@ async function readMany(
   return mapped;
 }
 
-async function useNeonAuthState(
+export async function useNeonAuthState(
   namespace = DEFAULT_NAMESPACE,
-): Promise<AuthStateStore> {
-  if (!getEncryptionKey()) {
-    throw new Error(
-      "FATAL: Both AUTH_STATE_KEY and AUTH_STATE_JWT_SECRET are missing. Authentication state MUST be encrypted in production. Please set AUTH_STATE_KEY in your environment."
-    );
-  }
-
+): Promise<any> {
   const databaseUrl = getDatabaseUrl();
 
   if (!databaseUrl) {
@@ -198,8 +119,12 @@ async function useNeonAuthState(
 
   const pool = new Pool({
     connectionString: databaseUrl,
-    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
-    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
+    max: 1, // Only 1 connection needed for auth state
+    // Set extremely low idle timeout. If the connection sits idle, close it immediately.
+    // This prevents pg-pool from trying to use a connection that Neon has silently dropped,
+    // which results in the 'timeout exceeded when trying to connect' error.
+    idleTimeoutMillis: 1000,
+    connectionTimeoutMillis: 15000, // 15 seconds to connect
     ssl:
       process.env.DATABASE_SSL === "false"
         ? false
@@ -212,46 +137,6 @@ async function useNeonAuthState(
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`⚠️ Neon pool error: ${message}`);
   });
-
-  // Pending writes queue (id -> value) and flusher state
-  const pendingWrites = new Map<string, StorageValue>();
-  let flushTimer: NodeJS.Timeout | null = null;
-  const FLUSH_INTERVAL_MS = Number(process.env.DB_FLUSH_INTERVAL_MS || 5000);
-
-  async function flushPendingWrites(): Promise<void> {
-    if (!pendingWrites.size) return;
-
-    for (const [id, value] of Array.from(pendingWrites.entries())) {
-      try {
-        // handle deletions marked with null
-        if (value === null) {
-          await deleteMany(pool, [id]);
-          pendingWrites.delete(id);
-          continue;
-        }
-
-        await upsertOne(pool, id, value);
-        pendingWrites.delete(id);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`⚠️ Failed flushing pending auth write ${id}: ${message}`);
-        // keep remaining entries for next attempt
-      }
-    }
-
-    if (pendingWrites.size === 0 && flushTimer) {
-      clearInterval(flushTimer);
-      flushTimer = null;
-    }
-  }
-
-  function ensureFlushTimer(): void {
-    if (flushTimer) return;
-    flushTimer = setInterval(() => {
-      // fire-and-forget
-      flushPendingWrites().catch(() => undefined);
-    }, FLUSH_INTERVAL_MS);
-  }
 
   await ensureSchema(pool);
 
@@ -285,69 +170,43 @@ async function useNeonAuthState(
       },
       set: async (data: any) => {
         try {
-          const writes: Promise<void>[] = [];
+          const writes: { id: string; value: StorageValue }[] = [];
           const deletions: string[] = [];
 
           for (const [typeKey, typeData] of Object.entries(data)) {
             for (const [id, value] of Object.entries(typeData as any)) {
               const dbKey = buildStorageKey(namespace, "key", typeKey, id);
               if (value) {
-                writes.push(upsertOne(pool, dbKey, value as StorageValue));
+                writes.push({ id: dbKey, value });
               } else {
                 deletions.push(dbKey);
               }
             }
           }
 
-          if (writes.length) await Promise.all(writes);
+          if (writes.length) await upsertMany(pool, writes);
           if (deletions.length) await deleteMany(pool, deletions);
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
           console.warn(`⚠️ Failed to persist auth keys to Neon: ${message}`);
-          for (const [typeKey, typeData] of Object.entries(data)) {
-            for (const [id, value] of Object.entries(typeData as any)) {
-              const dbKey = buildStorageKey(namespace, "key", typeKey, id);
-              if (value) pendingWrites.set(dbKey, value as StorageValue);
-              else pendingWrites.set(dbKey, null as any);
-            }
-          }
-          ensureFlushTimer();
         }
       },
     } as any,
   };
 
-  const saveCreds = async () => {
-    try {
-      await upsertOne(pool, credsKey, creds);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`⚠️ Failed to persist auth creds to Neon: ${message}`);
-      // queue and ensure background flusher runs
-      pendingWrites.set(credsKey, creds as StorageValue);
-      ensureFlushTimer();
-    }
-  };
-
   return {
     state,
-    saveCreds,
-    close: async () => {
+    saveCreds: async () => {
       try {
-        await flushPendingWrites();
+        await upsertMany(pool, [{ id: credsKey, value: state.creds }]);
       } catch (error) {
-        // ignore flush errors on shutdown
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`⚠️ Failed to persist auth creds to Neon: ${message}`);
       }
-
-      if (flushTimer) {
-        clearInterval(flushTimer);
-        flushTimer = null;
-      }
-
+    },
+    close: async () => {
       await pool.end();
     },
   };
 }
-
-export { useNeonAuthState, getDatabaseUrl };

@@ -21,7 +21,7 @@ export function getPool(): Pool | null {
       connectionTimeoutMillis: Number(
         process.env.DB_CONNECT_TIMEOUT_MS || 10000,
       ),
-      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 10000),
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
