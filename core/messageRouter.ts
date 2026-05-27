@@ -651,7 +651,9 @@ export async function handleMessageUpsert(
         ];
         const isStaticCommand = staticCommands.includes(cmdName);
 
-        if (userPrompt && GROQ_API_KEY && !isStaticCommand) {
+        const isAdmin = isAdminSender(msg, senderId);
+
+        if (userPrompt && GROQ_API_KEY && !isStaticCommand && !isAdmin) {
           const { hasPromptInjection } = await import("../security/promptFirewall");
           const isInjection = await hasPromptInjection(userPrompt, GROQ_API_KEY, GROQ_MODEL);
           if (isInjection) {

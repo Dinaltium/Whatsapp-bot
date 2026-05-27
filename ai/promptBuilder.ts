@@ -13,7 +13,7 @@ function wrapCDATA(value?: string | null): string {
 
 export async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
   try {
-    const clubs = await getClubs(false);
+    const clubs = await getClubs(true);
 
     // Always include current month
     const currentMonthYear = normalizeMonthYear("");
@@ -22,15 +22,17 @@ export async function buildDynamicContextPrompt(userPrompt: string): Promise<str
 
     // Extract explicitly requested months from user prompt
     const regex =
-      /(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[\s-]*(\d{2,4})/gi;
+      /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b[\s-]*(\d{2,4})?/gi;
     let m;
     while ((m = regex.exec(userPrompt))) {
-      monthsToFetch.add(normalizeMonthYear(m[0]));
+      const monthName = m[1];
+      const year = m[2] || String(new Date().getFullYear());
+      monthsToFetch.add(normalizeMonthYear(`${monthName}-${year}`));
     }
 
     const allEvents: { month: string; events: Event[] }[] = [];
     for (const m of monthsToFetch) {
-      const evts = await getEventsForMonth(m, false);
+      const evts = await getEventsForMonth(m, true);
       if (evts.length > 0) {
         allEvents.push({ month: m, events: evts });
       } else {
