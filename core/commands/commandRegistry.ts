@@ -41,10 +41,10 @@ export async function dispatchCommand(ctx: CommandContext): Promise<boolean> {
 
   if (lookupName === 'reveal') {
     majesticMode = 'private';
-  } else if (/^reveal!+$/.test(lookupName) || lookupName === 'revealthis!') {
+  } else if (/^reveal!+$/.test(lookupName) || /^revealthis!+$/.test(lookupName)) {
     majesticMode = 'public_silent';
     lookupName = 'reveal';
-  } else if (lookupName === 'thepowerofwhatsappinmyhands!') {
+  } else if (/^thepowerofwhatsappinmyhands!+$/.test(lookupName)) {
     majesticMode = 'public_shazam';
     lookupName = 'reveal';
   }

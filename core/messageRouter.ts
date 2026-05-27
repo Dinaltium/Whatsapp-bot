@@ -355,6 +355,28 @@ export async function handleMessageUpsert(
       }
       // ── END INTRO DETECTION ──────────────────────────────────────────────
 
+      // ── MAJESTIC REVEAL INTERCEPTOR (NO PREFIX REQUIRED) ──
+      const trimmedText = (text || "").trim().toLowerCase();
+      const isMajesticReveal = /^reveal!+$/.test(trimmedText) 
+        || /^revealthis!+$/.test(trimmedText) 
+        || /^thepowerofwhatsappinmyhands!+$/.test(trimmedText);
+
+      if (isMajesticReveal) {
+        const { dispatchCommand } = await import("./commands/commandRegistry");
+        const wasDispatched = await dispatchCommand({
+          sock,
+          msg,
+          cmdName: trimmedText,
+          cmdArgs: [],
+          senderId,
+          from: from || "",
+          session: await getSession(buildSessionKey(from || "", senderId)),
+        });
+        if (wasDispatched) {
+          continue;
+        }
+      }
+
       if (await shouldSkipMessage(sock, msg, from, text, senderId)) {
         continue;
       }
