@@ -8,8 +8,14 @@ import {
 import format from "pg-format";
 import "dotenv/config";
 
+import { encrypt, decrypt } from "../security/encryption";
+
 const AUTH_TABLE = "wa_auth_state";
 const DEFAULT_NAMESPACE = "parag";
+
+export function getEncryptionKey(): string {
+  return process.env.AUTH_STATE_KEY || process.env.AUTH_STATE_JWT_SECRET || "";
+}
 
 export function getDatabaseUrl(): string | undefined {
   return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
@@ -18,12 +24,35 @@ export function getDatabaseUrl(): string | undefined {
 type StorageValue = any;
 
 function serializeStateValue(value: StorageValue): string {
-  return JSON.stringify(value, BufferJSON.replacer);
+  const jsonStr = JSON.stringify(value, BufferJSON.replacer);
+  const key = getEncryptionKey();
+  if (key) {
+    return "enc:" + encrypt(jsonStr, key);
+  }
+  return jsonStr;
 }
 
 function deserializeStateValue(value: string | null): StorageValue {
   if (!value) return null;
-  return JSON.parse(value, BufferJSON.reviver);
+
+  let jsonStr = value;
+  const key = getEncryptionKey();
+
+  if (value.startsWith("enc:")) {
+    if (!key) {
+      throw new Error(
+        "Cannot decrypt auth state: AUTH_STATE_KEY is not configured but state in the database is encrypted.",
+      );
+    }
+    const encryptedData = value.slice(4);
+    jsonStr = decrypt(encryptedData, key);
+  } else if (key) {
+    console.warn(
+      "⚠️ Found unencrypted auth state data while encryption is enabled. Upgrading to encrypted on next write.",
+    );
+  }
+
+  return JSON.parse(jsonStr, BufferJSON.reviver);
 }
 
 function buildStorageKey(
