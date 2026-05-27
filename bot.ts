@@ -97,17 +97,9 @@ export function getActiveSocket(): any {
 
 export async function cleanupBotInstance(): Promise<void> {
   await cleanupClientInstance();
-
-  if (activeAuthStore) {
-    try {
-      if (activeAuthStore.close) {
-        await activeAuthStore.close();
-      }
-    } catch (e) {
-      console.warn("Error closing active auth store:", e);
-    }
-    activeAuthStore = null;
-  }
+  // NOTE: Do NOT close the auth store here.
+  // The persistentAuthStore singleton must survive socket reconnects.
+  // Its pool is closed only in SIGTERM/SIGINT when the process actually exits.
 }
 
 
