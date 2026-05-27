@@ -4,22 +4,6 @@ import { getDatabaseUrl } from "./neonAuthStateStore";
 // Global DB pool holder
 let dbPool: Pool | null = null;
 
-export function setPool(pool: Pool): void {
-  dbPool = pool;
-}
-
-export async function closePool(): Promise<void> {
-  if (dbPool) {
-    try {
-      await dbPool.end();
-      console.log("Database connection pool closed.");
-    } catch (e) {
-      console.error("Error closing database pool:", e);
-    }
-    dbPool = null;
-  }
-}
-
 export function getPool(): Pool | null {
   if (dbPool) return dbPool;
 
@@ -34,30 +18,14 @@ export function getPool(): Pool | null {
   try {
     dbPool = new Pool({
       connectionString: dbUrl,
-      // Neon free tier allows ~5 concurrent connections; keep pool small to
-      // avoid exhaustion when auth store + app pool both connect on cold start.
-      max: Number(process.env.DB_POOL_MAX || 3),
-      // 30 s gives Neon time to wake from cold start before giving up.
       connectionTimeoutMillis: Number(
-        process.env.DB_CONNECT_TIMEOUT_MS || 30000,
+        process.env.DB_CONNECT_TIMEOUT_MS || 10000,
       ),
-      // 120 s keeps connections alive through a QR scan (which can take 60s+).
-      // Without this, pg drops idle connections after 30 s and Neon has to
-      // cold-start again exactly when the handshake fires keys.set().
-      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 120000),
-      // TCP keepalive: sends OS-level probe packets on idle connections so
-      // Neon's serverless compute doesn't terminate them silently with a RST.
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 10000, // start probing after 10s idle
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
-          : {
-              rejectUnauthorized:
-                process.env.NODE_ENV === "production"
-                  ? true
-                  : process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
-            },
+          : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" },
     });
 
     dbPool.on("error", (err) => {
@@ -70,33 +38,6 @@ export function getPool(): Pool | null {
     return null;
   }
 }
-
-/**
- * Actively warm the pool by running a trivial query.
- * Call this before initialising the WhatsApp socket so Neon has a live
- * connection ready when the first `keys.set()` fires during the handshake.
- */
-export async function warmPool(retries = 5, delayMs = 3000): Promise<void> {
-  const pool = getPool();
-  if (!pool) return;
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      await pool.query("SELECT 1");
-      console.log("Database pool warmed successfully.");
-      return;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`⚠️ DB warm attempt ${attempt}/${retries} failed: ${msg}`);
-      if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, delayMs));
-      }
-    }
-  }
-  // Non-fatal — bot can still try; the write-queue will retry on failure.
-  console.warn("⚠️ Could not warm DB pool after all retries. Continuing anyway.");
-}
-
 
 // Bootstrap schema
 export async function ensureSchema(): Promise<void> {
