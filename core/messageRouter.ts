@@ -221,7 +221,7 @@ export async function handleMessageUpsert(
         }
       }
 
-      if (msg.pushName && senderId) {
+      if (msg.pushName && senderId && !msg.key?.fromMe) {
         await redis.hset("contact_names", senderId, msg.pushName);
         const rawLid = getSenderId(msg);
         if (rawLid && rawLid.endsWith("@lid") && rawLid !== senderId) {
