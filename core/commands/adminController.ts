@@ -1058,3 +1058,103 @@ registerCommand({
     }
   }
 });
+
+// ── CLEANUP NAMES ──
+registerCommand({
+  name: "cleanupnames",
+  requiresAdmin: true,
+  handler: async (ctx) => {
+    try {
+      const allContacts = await redis.hgetall("contact_names");
+      const adminEnv = process.env.ADMIN_JIDS || "";
+      const adminJids = adminEnv
+        .split(",")
+        .map((s) => s.trim().toLowerCase());
+
+      let deletedCount = 0;
+      for (const [jid, name] of Object.entries(allContacts)) {
+        if (name === "Ara Ara") {
+          const isActualAdmin = adminJids.some((adminJid) => {
+            return (
+              jid.toLowerCase() === adminJid ||
+              jid.toLowerCase().startsWith(adminJid.split("@")[0])
+            );
+          });
+
+          if (!isActualAdmin) {
+            await redis.hdel("contact_names", jid);
+            deletedCount++;
+          }
+        }
+      }
+
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        `✅ Cleaned up contact name cache in Redis. Deleted ${deletedCount} incorrect "Ara Ara" mappings.`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendBotReply(ctx.sock, ctx.from, `❌ Failed to clean up name cache:\n${msg}`);
+    }
+  }
+});
+
+// ── SET NAME ──
+registerCommand({
+  name: "setname",
+  requiresAdmin: true,
+  handler: async (ctx) => {
+    const jid = ctx.cmdArgs[0];
+    const name = ctx.cmdArgs.slice(1).join(" ").trim();
+
+    if (!jid || !name) {
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        "Usage: !setname <JID/LID> <New Name>\nExample: !setname 136249264357588@lid Sheik Rizwan"
+      );
+      return;
+    }
+
+    try {
+      const normalized = normalizeJid(jid) as string;
+      await redis.hset("contact_names", normalized, name);
+      
+      // Also try resolving it to Phone JID to map both JIDs
+      if (normalized.endsWith("@lid")) {
+        try {
+          const { resolvePhoneJidFromLid } = await import("../../storage/core/rbacRepository");
+          const phoneJid = await resolvePhoneJidFromLid(normalized);
+          if (phoneJid) {
+            await redis.hset("contact_names", phoneJid, name);
+          }
+        } catch (_) {}
+      } else if (normalized.endsWith("@s.whatsapp.net")) {
+        // Also map reverse if LID is known in the DB
+        try {
+          const pool = (await import("../../storage/db")).getPool();
+          if (pool) {
+            const res = await pool.query(
+              "SELECT lid FROM wa_lid_phone_map WHERE phone_jid = $1 LIMIT 1",
+              [normalized]
+            );
+            const lid = res.rows[0]?.lid;
+            if (lid) {
+              await redis.hset("contact_names", lid, name);
+            }
+          }
+        } catch (_) {}
+      }
+
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        `✅ Successfully set contact name for ${normalized} to "${name}" in cache.`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendBotReply(ctx.sock, ctx.from, `❌ Failed to set contact name:\n${msg}`);
+    }
+  }
+});
