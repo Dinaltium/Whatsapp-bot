@@ -227,9 +227,24 @@ export async function safeGetContactName(jid: string): Promise<string> {
       if (phoneJid) {
         name = await redis.hget("contact_names", phoneJid);
         if (name) return name;
+
+        // Fallback to phone number of the resolved JID
+        const phone = phoneJid.split("@")[0];
+        return `+${phone}`;
       }
     }
   } catch (_) {}
+
+  // Fallback to phone number if JID is phone JID
+  if (jid.endsWith("@s.whatsapp.net")) {
+    const phone = jid.split("@")[0];
+    return `+${phone}`;
+  }
+
+  // Fallback to bare LID key
+  if (jid.endsWith("@lid")) {
+    return `LID: ${jid.split("@")[0]}`;
+  }
 
   return "Unknown User";
 }
@@ -603,19 +618,38 @@ async function startBot(): Promise<void> {
     }
   });
 
-  // ── LID MAPPING VIA CONTACT SYNC ──────────────────────────────────────────
+  // ── LID MAPPING AND NAME CACHING VIA CONTACT SYNC ──────────────────────────────────────────
   // When Baileys syncs contacts (on startup and updates), each contact object
-  // may have both id (phone JID) and lid (LID). Persist any new mappings.
+  // may have both id (phone JID) and lid (LID). Persist any new mappings and cache names.
   sock.ev.on("contacts.upsert", async (contacts) => {
     try {
       const { storeLidPhoneMapping } = await import("./storage/core/rbacRepository");
+      const { redis } = await import("./storage/redisClient");
       let stored = 0;
+      let namesStored = 0;
       for (const contact of contacts) {
         if (!contact) continue;
 
         const cid = contact.id ? normalizeJid(contact.id) : null;
         const clid = (contact as any).lid ? normalizeJid((contact as any).lid) : null;
         const cpn = (contact as any).phoneNumber ? normalizeJid((contact as any).phoneNumber) : null;
+
+        const name = contact.name || contact.verifiedName || contact.notify;
+
+        if (name) {
+          if (cid) {
+            await redis.hset("contact_names", cid, name);
+            namesStored++;
+          }
+          if (clid && clid !== cid) {
+            await redis.hset("contact_names", clid, name);
+            namesStored++;
+          }
+          if (cpn && cpn !== cid && cpn !== clid) {
+            await redis.hset("contact_names", cpn, name);
+            namesStored++;
+          }
+        }
 
         let resolvedLid: string | null = null;
         let resolvedPn: string | null = null;
@@ -641,8 +675,47 @@ async function startBot(): Promise<void> {
           stored++;
         }
       }
-      if (stored > 0) {
-        logStructured({ event: "lid_mapped_from_contacts", count: stored });
+      if (stored > 0 || namesStored > 0) {
+        logStructured({ event: "contacts_upserted", lidMapped: stored, namesCached: namesStored });
+      }
+    } catch (_e) { /* non-critical */ }
+  });
+
+  sock.ev.on("contacts.update", async (contacts) => {
+    try {
+      const { redis } = await import("./storage/redisClient");
+      const { storeLidPhoneMapping } = await import("./storage/core/rbacRepository");
+      let namesStored = 0;
+      for (const contact of contacts) {
+        if (!contact) continue;
+
+        const cid = contact.id ? normalizeJid(contact.id) : null;
+        const clid = (contact as any).lid ? normalizeJid((contact as any).lid) : null;
+        const cpn = (contact as any).phoneNumber ? normalizeJid((contact as any).phoneNumber) : null;
+
+        const name = contact.name || contact.verifiedName || contact.notify;
+
+        if (name) {
+          if (cid) {
+            await redis.hset("contact_names", cid, name);
+            namesStored++;
+          }
+          if (clid && clid !== cid) {
+            await redis.hset("contact_names", clid, name);
+            namesStored++;
+          }
+          if (cpn && cpn !== cid && cpn !== clid) {
+            await redis.hset("contact_names", cpn, name);
+            namesStored++;
+          }
+        }
+
+        if (clid && cpn) {
+          await storeLidPhoneMapping(clid, cpn);
+        }
+      }
+      if (namesStored > 0) {
+        logStructured({ event: "contacts_updated", namesCached: namesStored });
       }
     } catch (_e) { /* non-critical */ }
   });
