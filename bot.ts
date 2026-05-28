@@ -212,6 +212,28 @@ export async function safeGetGroupName(sock: any, jid: string): Promise<string> 
   }
 }
 
+export async function safeGetContactName(jid: string): Promise<string> {
+  if (!jid) return "Unknown User";
+  try {
+    const { redis } = await import("./storage/redisClient");
+    // 1. Try direct lookup in Redis
+    let name = await redis.hget("contact_names", jid);
+    if (name) return name;
+
+    // 2. If it's a LID, try resolving to Phone JID
+    if (jid.endsWith("@lid")) {
+      const { resolvePhoneJidFromLid } = await import("./storage/core/rbacRepository");
+      const phoneJid = await resolvePhoneJidFromLid(jid);
+      if (phoneJid) {
+        name = await redis.hget("contact_names", phoneJid);
+        if (name) return name;
+      }
+    }
+  } catch (_) {}
+
+  return "Unknown User";
+}
+
 export async function shouldSkipMessage(
   sock: any,
   msg: proto.IWebMessageInfo,

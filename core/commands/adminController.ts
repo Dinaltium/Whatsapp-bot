@@ -1,7 +1,7 @@
 import { registerCommand } from "./commandRegistry";
 import groupConfig from "../../config/groupAllowlist";
 import chatConfig from "../../config/chatAllowlist";
-import { sendBotReply, safeGetGroupName, buildSessionKey } from "../../bot";
+import { sendBotReply, safeGetGroupName, safeGetContactName, buildSessionKey } from "../../bot";
 import { normalizeJid, isAdminAction } from "../../security/rbac";
 import { saveSession } from "../state";
 import { redis } from "../../storage/redisClient";
@@ -59,7 +59,7 @@ registerCommand({
               ? "DKB"
               : "PARAG";
         const statusLabel = entry.enabled ? "Enabled" : "Disabled";
-        const name = await redis.hget("contact_names", entry.jid) || "Unknown User";
+        const name = await safeGetContactName(entry.jid);
         return `${entry.id}. ${name} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
       });
       const formatted = await Promise.all(formattedPromises);
@@ -236,7 +236,7 @@ registerCommand({
       botNumber: chatEntry.botNumber,
     };
 
-    const name = await redis.hget("contact_names", chatEntry.jid) || "Unknown User";
+    const name = await safeGetContactName(chatEntry.jid);
     const botLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
 
     await sendBotReply(
@@ -338,7 +338,7 @@ registerCommand({
       botNumber: newBotNumber,
     };
 
-    const name = await redis.hget("contact_names", chatEntry.jid) || "Unknown User";
+    const name = await safeGetContactName(chatEntry.jid);
     const oldBotLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
     const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : "PARAG";
 

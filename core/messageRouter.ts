@@ -19,7 +19,7 @@ import {
   getSession, saveSession, getLastUserMessage, setLastUserMessage, 
   addPendingIntro, getPendingIntro, removePendingIntro, getAllPendingIntros, UserSession
 } from "./state";
-import { COMMAND_PREFIX, GROQ_API_KEY, GROQ_MODEL, extractMessageText, shouldSkipMessage, extractMentionedJids, sendBotReply, addSessionMessage, safeGetGroupName, buildSessionKey } from "../bot";
+import { COMMAND_PREFIX, GROQ_API_KEY, GROQ_MODEL, extractMessageText, shouldSkipMessage, extractMentionedJids, sendBotReply, addSessionMessage, safeGetGroupName, safeGetContactName, buildSessionKey } from "../bot";
 import { redis } from "../storage/redisClient";
 
 function unwrapMessage(message: any): any {
@@ -223,6 +223,10 @@ export async function handleMessageUpsert(
 
       if (msg.pushName && senderId) {
         await redis.hset("contact_names", senderId, msg.pushName);
+        const rawLid = getSenderId(msg);
+        if (rawLid && rawLid.endsWith("@lid") && rawLid !== senderId) {
+          await redis.hset("contact_names", rawLid, msg.pushName);
+        }
       }
 
       if (text) {
@@ -459,7 +463,7 @@ export async function handleMessageUpsert(
               pending.jid,
               JSON.stringify({ jid: pending.jid, botNumber: pending.botNumber })
             );
-            const name = await redis.hget("contact_names", pending.jid) || "Unknown User";
+            const name = await safeGetContactName(pending.jid);
             await sendBotReply(
               sock,
               from || "",
@@ -539,7 +543,7 @@ export async function handleMessageUpsert(
               pending.jid,
               JSON.stringify({ botNumber: pending.botNumber })
             );
-            const name = await redis.hget("contact_names", pending.jid) || "Unknown User";
+            const name = await safeGetContactName(pending.jid);
             await sendBotReply(
               sock,
               from || "",
