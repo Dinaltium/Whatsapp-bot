@@ -676,7 +676,7 @@ async function startBot(): Promise<void> {
         }
       }
       if (stored > 0 || namesStored > 0) {
-        logStructured({ event: "contacts_upserted", lidMapped: stored, namesCached: namesStored });
+        logEvent("debug", { event: "contacts_upserted", lidMapped: stored, namesCached: namesStored });
       }
     } catch (_e) { /* non-critical */ }
   });
@@ -715,7 +715,7 @@ async function startBot(): Promise<void> {
         }
       }
       if (namesStored > 0) {
-        logStructured({ event: "contacts_updated", namesCached: namesStored });
+        logEvent("debug", { event: "contacts_updated", namesCached: namesStored });
       }
     } catch (_e) { /* non-critical */ }
   });
