@@ -370,36 +370,43 @@ export async function getEventsForMonth(
       [normalized],
     );
 
-    if (!allowScrape) {
-      return dbEvents.rows as Event[];
-    }
+    // Enforce a strict 30-minute cooldown since the last check for this specific month
+    const fresh = await isCacheValid(cacheKey, 30 * 60 * 1000);
 
-    // Check cache freshness (only reuse cache if valid AND we actually have records for this month)
-    const fresh = await isCacheValid(cacheKey);
-
-    if (fresh && dbEvents.rows.length > 0) {
+    if (fresh) {
+      // Cooldown active: Return the existing DB results instantly (whether empty [] or populated)
       return dbEvents.rows as Event[];
     }
 
     if (dbEvents.rows.length > 0) {
-      // Stale cache hit: Return immediately, run scrape in background
-      console.log(
-        `Events cache is stale for ${normalized}. serving DB records and running background crawling...`,
-      );
-      triggerBackgroundEventsScrape(normalized);
+      // Cooldown expired but DB has events: Return instantly and trigger update in the background
+      if (allowScrape) {
+        console.log(
+          `Events cache is stale for ${normalized}. Serving DB records and running background crawling...`,
+        );
+        triggerBackgroundEventsScrape(normalized);
+      }
       return dbEvents.rows as Event[];
     }
 
-    // No records exist and cache is NOT fresh: Run in foreground so the user receives a correct list
+    // Cooldown expired and DB has 0 events:
+    if (!allowScrape) {
+      // Non-blocking query requested: trigger background crawl to populate database and return [] instantly
+      console.log(
+        `Events database empty for ${normalized}. Triggering background calendar scraping...`,
+      );
+      triggerBackgroundEventsScrape(normalized);
+      return [];
+    }
+
+    // Foreground scrape allowed: block until Puppeteer returns events to ensure accuracy
     console.log(
       `Events database empty/missing cache for ${normalized}. Running foreground calendar scraping...`,
     );
     const liveEvents = await getEventsLiveLocked(normalized);
-    if (liveEvents && liveEvents.length > 0) {
+    if (liveEvents) {
       await saveEventsToDb(liveEvents, normalized);
       await markCacheUpdated(cacheKey);
-    } else {
-      console.warn(`Foreground events scrape for ${normalized} returned empty array, skipping cache update to allow retry.`);
     }
     return liveEvents;
   } catch (error) {
@@ -474,15 +481,11 @@ function triggerBackgroundEventsScrape(monthYear: string): void {
   const cacheKey = `calendar:${monthYear}`;
   getEventsLiveLocked(monthYear)
     .then(async (live) => {
-      if (live && live.length > 0) {
+      if (live) {
         await saveEventsToDb(live, monthYear);
         await markCacheUpdated(cacheKey);
         console.log(
-          `Background events scrape for ${monthYear} completed successfully.`,
-        );
-      } else {
-        console.warn(
-          `Background events scrape for ${monthYear} returned empty array, skipping cache update.`
+          `Background events scrape for ${monthYear} completed successfully with ${live.length} events.`,
         );
       }
     })

@@ -1,6 +1,6 @@
 import { getPool } from "../db";
 
-export async function isCacheValid(key: string): Promise<boolean> {
+export async function isCacheValid(key: string, maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<boolean> {
   const pool = getPool();
   if (!pool) return false;
 
@@ -16,8 +16,7 @@ export async function isCacheValid(key: string): Promise<boolean> {
     const now = Date.now();
     const cacheAgeMs = now - lastUpdated;
 
-    // 24 hours = 24 * 60 * 60 * 1000 ms
-    return cacheAgeMs < 24 * 60 * 60 * 1000;
+    return cacheAgeMs < maxAgeMs;
   } catch (error) {
     console.error(`⚠️ Failed to verify cache freshness for ${key}:`, error);
     return false;

@@ -262,11 +262,6 @@ export async function getClubs(allowScrape: boolean = true): Promise<Club[]> {
       SELECT id, name, college, description, website, logo, pocs, representatives 
       FROM dk24_clubs ORDER BY id ASC
     `);
-
-    if (!allowScrape) {
-      return dbClubs.rows as Club[];
-    }
-
     // 2. Check cache freshness (only reuse cache if valid AND we actually have records)
     const fresh = await isCacheValid("clubs");
 
@@ -276,11 +271,20 @@ export async function getClubs(allowScrape: boolean = true): Promise<Club[]> {
 
     if (dbClubs.rows.length > 0) {
       // Background scrape since we have cached stale records (serves instantly, updates quietly)
-      console.log(
-        "Clubs cache is stale. serving DB cached records and running background crawling...",
-      );
-      triggerBackgroundClubsScrape();
+      if (allowScrape) {
+        console.log(
+          "Clubs cache is stale. serving DB cached records and running background crawling...",
+        );
+        triggerBackgroundClubsScrape();
+      }
       return dbClubs.rows as Club[];
+    }
+
+    if (!allowScrape) {
+      // Non-blocking query requested: trigger background crawl to populate database and return [] instantly
+      console.log("Clubs database is empty. Triggering background scraping...");
+      triggerBackgroundClubsScrape();
+      return [];
     }
 
     // Foreground scrape since database is completely empty
