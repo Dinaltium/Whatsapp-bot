@@ -62,6 +62,14 @@ function loadDocFile(filename: string): string | null {
   return null;
 }
 
+function formatSearchResponse(res: any): string {
+  if (!res || !res.results || res.results.length === 0) return "";
+  let out = "";
+  if (res.answer) out += `Direct Answer: ${res.answer}\n\n`;
+  out += res.results.map((r: any) => `Title: ${r.title}\nURL: ${r.url}\nContent: ${r.content}`).join("\n\n");
+  return out;
+}
+
 function getQuotedText(msg: proto.IWebMessageInfo): string | null {
   const ext = msg.message?.extendedTextMessage;
   if (!ext?.contextInfo?.quotedMessage) return null;
@@ -568,7 +576,11 @@ export async function handleMessage(
         usedAI: false,
       };
     }
-    const searchContext = await searchWeb(query);
+    
+    console.info(`[SELF] Executing explicit web search for query: "${query}"`);
+    const searchResult = await searchWeb(query);
+    const searchContext = formatSearchResponse(searchResult);
+    
     if (!groqApiKey) {
       return {
         reply: searchContext
@@ -601,11 +613,19 @@ export async function handleMessage(
   let modelToUse = GROQ_MODEL_DEFAULT;
 
   if (requiresCurrentInfo(raw)) {
-    const searchContext = await searchWeb(raw);
+    console.info(`[SELF] Current info pattern detected in prompt. Triggering web search.`);
+    const searchResult = await searchWeb(raw);
+    const searchContext = formatSearchResponse(searchResult);
+    
     if (searchContext) {
+      console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
       systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nReal-time web search results:\n${searchContext}`;
       modelToUse = GROQ_MODEL_SCOUT;
+    } else {
+      console.warn(`[SELF] Web search was triggered but returned no results.`);
     }
+  } else {
+    console.debug(`[SELF] No current info pattern detected. Proceeding with standard generation.`);
   }
 
   // Use last 8 session messages as context
