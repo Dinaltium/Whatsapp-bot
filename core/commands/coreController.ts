@@ -36,7 +36,7 @@ registerCommand({
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      "Context reset for your session. Start with a new !tech or !hackathon question."
+      "Context reset for your session. Start with a new !tech or !hackathon question.",
     );
   },
 });
@@ -61,12 +61,12 @@ registerCommand({
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Your JID: ${ctx.senderId}\nNormalized: ${normalized}`
+      `Your JID: ${ctx.senderId}\nNormalized: ${normalized}`,
     );
   },
 });
 
-// ── HELP COMMAND ──
+// ── HELP COMMAND (dynamic — Task 4.6) ──
 registerCommand({
   name: "help",
   handler: async (ctx) => {
@@ -79,48 +79,11 @@ registerCommand({
       botNumber = chatBot?.botNumber || 0;
     }
 
-    let helpText = "";
-    if (botNumber === 1) {
-      helpText = [
-        "ECB - EmbedClub Assistant",
-        "Available Commands:",
-        "• !ping - Check bot response and status",
-        "• !hello - Check bot availability",
-        "• !reset - Reset your conversation context",
-        "• !<question> - Ask about ECB events, hardware/embedded activities, and community guidelines",
-      ].join("\n");
-    } else if (botNumber === 2) {
-      helpText = [
-        "DKB - DK24 (Developer Kommunity 24) Assistant",
-        "Available Commands:",
-        "• !ping - Check bot response and status",
-        "• !hello - Check bot availability",
-        "• !reset - Reset your conversation context",
-        "• !clubs - List all official member communities in the DK24 network",
-        "• !club <name> - Get detailed spotlight card for a specific member community",
-        "• !events [monthYear] - List chronological events (e.g. !events may-2026)",
-        "• !event <name> - Get details, timeline, and registration links for an event",
-        "• !mentors [page] - List mentors in alphabetical order (10 per page)",
-        "• !mentor -id <id> - View full details for a specific mentor by ID",
-        "• !mentor -f <letter_or_query> [page] - Filter mentors by name",
-        "• !next - View the next page of mentors from your active query",
-        "• !page <number> - View a specific page of mentors from your active query",
-        "• !addmentor -n <name> -o <org> [-d <desc>] [-ex <expertise>] [-l <linkedin>] [-i <instagram>] [-g <github>] [-e <email>] [-p <phone>] - Add a mentor (Authorized only)",
-        "• !editmentor -id <id> -<flag> <value> - Update a single field on a mentor (Authorized only)",
-        "• !delmentor -id <id> - Remove a mentor (Authorized only)",
-        "• !<question> - Chat directly with DKB (e.g. !What is a good way to host an AI meetup?)",
-      ].join("\n");
-    } else {
-      // Default to Bot 0 (PARAG)
-      helpText = [
-        "PARAG - Technology and Hackathon Assistant",
-        "Available Commands:",
-        "• !ping - Check bot response and status",
-        "• !hello - Check bot availability",
-        "• !reset - Reset your conversation context",
-        "• !<question> - Chat directly with PARAG (e.g. !How do I optimize API latency?)",
-      ].join("\n");
-    }
+    const { getBotRegistry } = await import("../../agents/WhatsAppAgent");
+    const bot = getBotRegistry().find((b) => b.botId === botNumber);
+    const helpText = bot
+      ? bot.getHelpText()
+      : "Bot not configured for this chat. Contact an admin.";
 
     await sendBotReply(ctx.sock, ctx.from, helpText);
   },
