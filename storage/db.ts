@@ -28,7 +28,10 @@ export function getPool(): Pool | null {
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
-          : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" },
+          : {
+              rejectUnauthorized:
+                process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+            },
     });
 
     dbPool.on("error", (err) => {
@@ -54,21 +57,23 @@ export async function ensureSchema(): Promise<void> {
   try {
     // Check if the old schema needs to be dropped (i.e. does not have the 'id' column)
     const tableCheck = await pool.query(`
-      SELECT 1 
-      FROM information_schema.tables 
+      SELECT 1
+      FROM information_schema.tables
       WHERE table_name = 'wa_allowed_groups'
       LIMIT 1;
     `);
 
     const columnCheck = await pool.query(`
-      SELECT 1 
-      FROM information_schema.columns 
+      SELECT 1
+      FROM information_schema.columns
       WHERE table_name = 'wa_allowed_groups' AND column_name = 'id'
       LIMIT 1;
     `);
 
     if (tableCheck.rows.length > 0 && columnCheck.rows.length === 0) {
-      console.log("Upgrading allowed groups and allowed chats schemas to support sequential IDs...");
+      console.log(
+        "Upgrading allowed groups and allowed chats schemas to support sequential IDs...",
+      );
       await pool.query("DROP TABLE IF EXISTS wa_allowed_groups CASCADE;");
       await pool.query("DROP TABLE IF EXISTS wa_allowed_chats CASCADE;");
     }
@@ -85,7 +90,7 @@ export async function ensureSchema(): Promise<void> {
         representatives JSONB NOT NULL DEFAULT '[]'::jsonb,
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
-      
+
       CREATE TABLE IF NOT EXISTS dk24_events (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -105,7 +110,7 @@ export async function ensureSchema(): Promise<void> {
         month_year TEXT NOT NULL,
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
-      
+
       CREATE TABLE IF NOT EXISTS dk24_cache_log (
         key TEXT PRIMARY KEY,
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -204,6 +209,16 @@ export async function ensureSchema(): Promise<void> {
         target_name TEXT,
         details TEXT,
         logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS self_reminders (
+        id SERIAL PRIMARY KEY,
+        owner_jid TEXT NOT NULL,
+        chat_jid TEXT NOT NULL,
+        message TEXT NOT NULL,
+        remind_at TIMESTAMPTZ NOT NULL,
+        sent BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS wa_reminders (
