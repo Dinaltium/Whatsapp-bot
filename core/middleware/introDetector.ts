@@ -13,12 +13,21 @@
 import { normalizeJid } from "../../security/rbac";
 import { getJidHash, logStructured } from "../../utils/logger";
 import {
-  addPendingIntro, getPendingIntro, removePendingIntro, getAllPendingIntros
+  addPendingIntro,
+  getPendingIntro,
+  removePendingIntro,
+  getAllPendingIntros,
 } from "../state";
-import { extractMentionedJids, sendBotReply, GROQ_API_KEY, GROQ_MODEL, COMMAND_PREFIX } from "../../bot";
+import {
+  extractMentionedJids,
+  sendBotReply,
+  GROQ_API_KEY,
+  GROQ_MODEL,
+  COMMAND_PREFIX,
+} from "../../bot";
 import groupConfig from "../../config/groupAllowlist";
 import chatConfig from "../../config/chatAllowlist";
-import DKBAgent from "../../agents/DKBAgent";
+import { classifyAndAutoAddMentor } from "../../agents/DKBAgent";
 
 /**
  * Runs intro detection on a message. Returns true if the message was
@@ -62,8 +71,7 @@ export async function handleIntroDetection(
     }
     // Fallback: extract phone numbers from text when no @mention
     if (mentionedJids.length === 0) {
-      const phoneMatches =
-        text.match(/(?:\+?\d[\d\s\-]{7,14}\d)/g) || [];
+      const phoneMatches = text.match(/(?:\+?\d[\d\s\-]{7,14}\d)/g) || [];
       for (const ph of phoneMatches) {
         const digits = ph.replace(/\D/g, "");
         if (digits.length >= 10) {
@@ -109,14 +117,14 @@ export async function handleIntroDetection(
     });
     try {
       const senderPhone = introSenderId.replace(/@.*/, "");
-      const result = await DKBAgent.classifyAndAutoAddMentor(
+      const result = await classifyAndAutoAddMentor(
         text,
         introSenderId,
         senderPhone,
         GROQ_API_KEY,
         GROQ_MODEL,
       );
-      
+
       if (result.isMentor) {
         logStructured({
           event: "intro_classified",
@@ -144,7 +152,6 @@ export async function handleIntroDetection(
       }
 
       await sendBotReply(sock, from, welcomeText);
-      
     } catch (err) {
       console.error("[DEBUG] Intro classification error:", err);
     }
