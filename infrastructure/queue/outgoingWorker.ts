@@ -1,5 +1,6 @@
 import { Worker } from "bullmq";
 import { getActiveSocket } from "../../bot";
+import { calculateTypingDelay } from "../../utils/typingDelay";
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -29,15 +30,7 @@ export const outgoingWorker = new Worker(
       console.error("[ReplyWorker] Failed to send typing presence:", err);
     }
 
-    const textLength = String(text || "").length;
-    const baseDelay = Math.floor(Math.random() * 1500) + 1200; // 1200ms to 2700ms base reading/thinking delay
-    const charDelay = textLength * 20; // 20ms per character of typing
-    let totalDelay = baseDelay + charDelay;
-
-    const maxDelayCap = Math.floor(Math.random() * 10000) + 20000; // 20000ms to 30000ms
-    if (totalDelay > maxDelayCap) {
-      totalDelay = maxDelayCap;
-    }
+    const totalDelay = calculateTypingDelay(text);
 
     console.log(`[ReplyWorker] Simulating typing delay of ${totalDelay}ms for ${to}`);
     await new Promise((resolve) => setTimeout(resolve, totalDelay));
