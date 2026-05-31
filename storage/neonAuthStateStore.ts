@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import {
   AuthenticationState,
   AuthenticationCreds,
@@ -146,26 +146,16 @@ export async function useNeonAuthState(
     );
   }
 
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    max: 1, // Only 1 connection needed for auth state
-    // Set extremely low idle timeout. If the connection sits idle, close it immediately.
-    // This prevents pg-pool from trying to use a connection that Neon has silently dropped,
-    // which results in the 'timeout exceeded when trying to connect' error.
-    idleTimeoutMillis: 1000,
-    connectionTimeoutMillis: 15000, // 15 seconds to connect
-    ssl:
-      process.env.DATABASE_SSL === "false"
-        ? false
-        : {
-            rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
-          },
-  });
+  // Use the shared global pool from db.ts instead of creating an independent pool.
+  // This prevents connection exhaustion on Neon's serverless tier.
+  const { getPool } = await import("./db");
+  let pool = getPool();
 
-  pool.on("error", (error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`⚠️ Neon pool error: ${message}`);
-  });
+  if (!pool) {
+    throw new Error(
+      "Failed to obtain shared database pool for auth state storage.",
+    );
+  }
 
   await ensureSchema(pool);
 
@@ -180,7 +170,7 @@ export async function useNeonAuthState(
           const keyIds = ids.map((id) =>
             buildStorageKey(namespace, "key", type, id),
           );
-          const rows = await readMany(pool, keyIds);
+          const rows = await readMany(pool!, keyIds);
           const data: any = {};
 
           ids.forEach((id) => {
@@ -213,8 +203,8 @@ export async function useNeonAuthState(
             }
           }
 
-          if (writes.length) await upsertMany(pool, writes);
-          if (deletions.length) await deleteMany(pool, deletions);
+          if (writes.length) await upsertMany(pool!, writes);
+          if (deletions.length) await deleteMany(pool!, deletions);
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
@@ -228,14 +218,14 @@ export async function useNeonAuthState(
     state,
     saveCreds: async () => {
       try {
-        await upsertMany(pool, [{ id: credsKey, value: state.creds }]);
+        await upsertMany(pool!, [{ id: credsKey, value: state.creds }]);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`⚠️ Failed to persist auth creds to Neon: ${message}`);
       }
     },
     close: async () => {
-      await pool.end();
+      // No-op: pool lifecycle is managed by db.ts, not by the auth state store
     },
   };
 }
