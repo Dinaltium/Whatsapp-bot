@@ -87,5 +87,5 @@ export async function dispatchCommand(ctx: CommandContext): Promise<boolean> {
 
 // Auto-boot command controllers registrations
 import "./coreController";
-import "./adminController";
+import "./admin/index";
 import "./directoryController";
