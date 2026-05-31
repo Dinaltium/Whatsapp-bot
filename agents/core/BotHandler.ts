@@ -1,6 +1,5 @@
+import { proto } from "@whiskeysockets/baileys";
 import { UserSession } from "../../core/state";
-
-export type { UserSession };
 
 export interface AgentResult {
   reply: string;
@@ -11,17 +10,21 @@ export interface AgentResult {
 export interface BotContext {
   session: UserSession;
   prompt: string;
-  groqApiKey: string | undefined;
-  groqModel: string;
   isAdmin: boolean;
-  senderJid?: string;
+  senderJid: string;
+  from: string;
+  sock: any;
+  msg: proto.IWebMessageInfo;
+  groqApiKey?: string;
+  groqModel: string;
 }
 
 export interface BotHandler {
-  botId: number;
-  name: string;
-  requiresAllowlist: true;
-  isInDomain: (prompt: string) => boolean;
-  handleMessage: (ctx: BotContext) => Promise<AgentResult>;
-  getHelpText: () => string;
+  readonly botId: number;
+  readonly name: string;
+  readonly requiresAllowlist: true;
+
+  isInDomain(prompt: string): boolean;
+  handleMessage(ctx: BotContext): Promise<AgentResult>;
+  getHelpText(): string;
 }
