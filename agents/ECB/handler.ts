@@ -1,5 +1,5 @@
 import { ECB_HEADER, HELP_TEXT, DEFAULT_TEXT } from "./intro";
-import { getEcbProjects } from "../../storage/ECB/ecbRepository";
+import { getProjects, getEvents, getDeadlines } from "../../storage/ECB/ecbRepository";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -46,8 +46,41 @@ export async function handleMessage(
     };
   }
 
+  if (normalizedPrompt.startsWith("!projects")) {
+    const projects = await getProjects();
+    const reply = projects.length > 0 
+      ? `Projects:\n${projects.map(p => `- ${p.name}`).join('\n')}` 
+      : "No projects found.";
+    return {
+      reply: formatBotReply(reply),
+      usedAI: false,
+    };
+  }
+
+  if (normalizedPrompt.startsWith("!events")) {
+    const events = await getEvents();
+    const reply = events.length > 0 
+      ? `Upcoming Events:\n${events.map(e => `- ${e.title}`).join('\n')}` 
+      : "No upcoming events found.";
+    return {
+      reply: formatBotReply(reply),
+      usedAI: false,
+    };
+  }
+
+  if (normalizedPrompt.startsWith("!deadlines")) {
+    const deadlines = await getDeadlines();
+    const reply = deadlines.length > 0 
+      ? `Upcoming Deadlines:\n${deadlines.map(d => `- ${d.title}`).join('\n')}` 
+      : "No upcoming deadlines found.";
+    return {
+      reply: formatBotReply(reply),
+      usedAI: false,
+    };
+  }
+
   return {
-    reply: formatBotReply(DEFAULT_TEXT),
+    reply: formatBotReply("EmbedClub assistant is under active development. For now, use !help to see available commands."),
     usedAI: false,
   };
 }

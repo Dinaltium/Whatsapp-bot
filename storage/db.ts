@@ -217,9 +217,31 @@ export async function ensureSchema(): Promise<void> {
       );
 
       CREATE TABLE IF NOT EXISTS ecb_projects (
-        id SERIAL PRIMARY KEY,
-        title TEXT NOT NULL,
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
         description TEXT,
+        status TEXT NOT NULL DEFAULT 'planned',
+        members TEXT[],
+        demo_date TEXT,
+        repo_url TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ecb_events (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        date TEXT NOT NULL,
+        description TEXT,
+        registration_link TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ecb_deadlines (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        deadline TEXT NOT NULL,
+        description TEXT,
+        notify_days_before INTEGER NOT NULL DEFAULT 1,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 

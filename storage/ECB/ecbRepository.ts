@@ -1,35 +1,43 @@
 import { getPool } from "../db";
 
-export interface EcbProject {
-  id: number;
-  title: string;
+export interface ECBProject {
+  id: string;
+  name: string;
   description: string;
-  created_at: Date;
+  status: "planned" | "in_progress" | "completed";
+  members: string[];
+  demoDate?: string;
+  repoUrl?: string;
 }
 
-export async function createEcbProject(title: string, description: string): Promise<EcbProject | null> {
-  const pool = getPool();
-  if (!pool) return null;
-  try {
-    const res = await pool.query(
-      `INSERT INTO ecb_projects (title, description) VALUES ($1, $2) RETURNING *`,
-      [title, description]
-    );
-    return res.rows[0];
-  } catch (error) {
-    console.error("Error creating ECB project:", error);
-    return null;
-  }
+export interface ECBEvent {
+  id: string;
+  title: string;
+  date: string;
+  description: string;
+  registrationLink?: string;
 }
 
-export async function getEcbProjects(): Promise<EcbProject[]> {
-  const pool = getPool();
-  if (!pool) return [];
-  try {
-    const res = await pool.query(`SELECT * FROM ecb_projects ORDER BY created_at DESC`);
-    return res.rows;
-  } catch (error) {
-    console.error("Error fetching ECB projects:", error);
-    return [];
-  }
+export interface ECBDeadline {
+  id: string;
+  title: string;
+  deadline: string;
+  description: string;
+  notifyDaysBefore: number;
+}
+
+export async function getProjects(): Promise<ECBProject[]> {
+  return []; // Stub
+}
+
+export async function getEvents(): Promise<ECBEvent[]> {
+  return []; // Stub
+}
+
+export async function getDeadlines(): Promise<ECBDeadline[]> {
+  return []; // Stub
+}
+
+export async function getUpcomingDeadlines(withinDays: number): Promise<ECBDeadline[]> {
+  return []; // Stub
 }
