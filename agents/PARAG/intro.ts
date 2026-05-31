@@ -95,3 +95,12 @@ export function getDomainRestrictionReply(): string {
     "Example: !How do I design a scalable hackathon project with Node and Redis?",
   ].join("\n");
 }
+
+export const PARAG_HELP_TEXT = [
+  "PARAG - Technology and Hackathon Assistant",
+  "Available Commands:",
+  "\u2022 !ping - Check bot response and status",
+  "\u2022 !hello - Check bot availability",
+  "\u2022 !reset - Reset your conversation context",
+  "\u2022 !<question> - Chat directly with PARAG (e.g. !How do I optimize API latency?)",
+].join("\n");
