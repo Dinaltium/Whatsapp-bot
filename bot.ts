@@ -1,6 +1,5 @@
 import {
   default as makeWASocket,
-  useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
   proto,
@@ -9,21 +8,12 @@ import http from "http";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
-import WhatsAppAgent from "./agents/WhatsAppAgent";
-import DKBAgent from "./agents/DKBAgent";
 import groupConfig from "./config/groupAllowlist";
 import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
 import { getJidHash, logStructured, logEvent } from "./utils/logger";
-import { normalizeJid, getSenderId, isAdminSender, isAdminAction } from "./security/rbac";
-import {
-  checkAiRateLimit,
-  checkGroupAndGlobalLimits,
-  shouldSendRateLimitNotice,
-  formatRetryAfter,
-  incrementGlobalDailyAiCount,
-  clearRateLimitNotice,
-} from "./security/rateLimiter";
+import { normalizeJid, isAdminSender } from "./security/rbac";
+import { calculateTypingDelay } from "./utils/typingDelay";
 
 export const COMMAND_PREFIX = "!";
 export const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -81,8 +71,6 @@ interface UserSession {
 
 const userAiSessions = new Map<string, UserSession>();
 const lastSentMessages = new Map<string, string>();
-const lastUserMessages = new Map<string, string>();
-const lastGroupInteractionTime = new Map<string, number>();
 
 // Tracks members being watched for their intro message after a
 // "welcome / introduce" trigger in a bot-2 group.
@@ -155,17 +143,7 @@ export async function sendBotReply(
     console.error("Failed to send presence update:", err);
   }
 
-  // Calculate dynamic delay based on length of response to look highly natural
-  const textLength = String(text || "").length;
-  const baseDelay = Math.floor(Math.random() * 1500) + 1200; // 1200ms to 2700ms base (reading/thinking delay)
-  const charDelay = textLength * 20; // 20ms per character of typing speed
-  let totalDelay = baseDelay + charDelay;
-
-  // Cap total typing duration at 20-30 seconds (randomized ceiling)
-  const maxDelayCap = Math.floor(Math.random() * 10000) + 20000; // 20000ms to 30000ms
-  if (totalDelay > maxDelayCap) {
-    totalDelay = maxDelayCap;
-  }
+  const totalDelay = calculateTypingDelay(text);
 
   await new Promise((resolve) => setTimeout(resolve, totalDelay));
 
