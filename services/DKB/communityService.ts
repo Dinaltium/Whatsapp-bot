@@ -1,12 +1,30 @@
 import { getClubs } from "../../storage/DKB/communityRepository";
 import { cleanRole } from "../../utils/normalization";
 
-const COMMUNITY_KEYWORDS = [
+// Specific keywords: match on their own (club/community names, DK24 branding)
+const COMMUNITY_SPECIFIC = [
   "community",
   "kommunity",
   "dk24",
   "dkb",
   "daik",
+  "sosc",
+  "sahyadri",
+  "devnation",
+  "finiteloop",
+  "sceptix",
+  "techbots",
+  "embed",
+  "acm",
+  "canara",
+  "cosc",
+  "hacktofuture",
+  "hackfest",
+  "openloop",
+];
+
+// Contextual keywords: only match when combined with a DK24-specific anchor
+const COMMUNITY_CONTEXTUAL = [
   "meetup",
   "event",
   "collab",
@@ -25,26 +43,34 @@ const COMMUNITY_KEYWORDS = [
   "help",
   "hello",
   "hi",
-  "sosc",
-  "sahyadri",
-  "devnation",
-  "finiteloop",
-  "sceptix",
-  "techbots",
   "core",
-  "embed",
-  "acm",
-  "canara",
-  "cosc",
-  "hacktofuture",
-  "hackfest",
-  "openloop",
+];
+
+// Anchor words that confirm DK24 context when combined with contextual keywords
+const DK24_ANCHORS = [
+  "dk24",
+  "dkb",
+  "daik",
+  "kommunity",
+  "community",
+  "club",
+  "clubs",
+  "member",
 ];
 
 export function isCommunityQuery(query: string | null | undefined): boolean {
   if (!query) return false;
   const normalized = query.toLowerCase();
-  return COMMUNITY_KEYWORDS.some((kw) => normalized.includes(kw));
+
+  // Tier 1: Specific keywords always match
+  if (COMMUNITY_SPECIFIC.some((kw) => normalized.includes(kw))) {
+    return true;
+  }
+
+  // Tier 2: Contextual keywords only match if a DK24 anchor is also present
+  const hasContextual = COMMUNITY_CONTEXTUAL.some((kw) => normalized.includes(kw));
+  const hasAnchor = DK24_ANCHORS.some((anchor) => normalized.includes(anchor));
+  return hasContextual && hasAnchor;
 }
 
 export async function handleClubsCommand(): Promise<string> {
