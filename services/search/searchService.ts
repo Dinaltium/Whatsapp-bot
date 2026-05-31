@@ -41,6 +41,12 @@ export const CURRENT_INFO_PATTERNS = [
   /\b2025\b/i,
   /\b2026\b/i,
   /\b2027\b/i,
+  /\bscore\b/i,
+  /\blive\b/i,
+  /\branking(s)?\b/i,
+  /\bstandings\b/i,
+  /\bpoints table\b/i,
+  /\bmatch\b/i,
 ];
 
 // Patterns that require absolute latest live data
@@ -50,6 +56,11 @@ export const RECENCY_SENSITIVE_PATTERNS = [
   /\bnewest\b/i,
   /\bjust released\b/i,
   /\bthis week\b/i,
+  /\blive\b/i,
+  /\bscore\b/i,
+  /\bmatch\b/i,
+  /\bpoints table\b/i,
+  /\bstandings\b/i,
 ];
 
 export function requiresCurrentInfo(prompt: string): boolean {
