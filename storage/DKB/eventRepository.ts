@@ -21,27 +21,7 @@ export interface Event {
   month_year: string;
 }
 
-// Global promise queue to serialize Puppeteer crawl executions
-let puppeteerQueue: Promise<any> = Promise.resolve();
-
-async function serializePuppeteer<T>(task: () => Promise<T>): Promise<T> {
-  const currentQueue = puppeteerQueue;
-  let resolveQueue: () => void;
-  const nextInQueue = new Promise<void>((resolve) => {
-    resolveQueue = resolve;
-  });
-  puppeteerQueue = nextInQueue;
-  try {
-    await currentQueue;
-  } catch (err) {
-    // Ignore errors from previous tasks in the queue to prevent deadlocking
-  }
-  try {
-    return await task();
-  } finally {
-    resolveQueue!();
-  }
-}
+import { serializePuppeteer } from "../../utils/puppeteerQueue";
 
 // Date normalization helper (e.g. may26, may-2026, May 26 -> may-2026)
 export function normalizeMonthYear(input: string): string {
@@ -100,7 +80,7 @@ export function normalizeMonthYear(input: string): string {
 }
 
 export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
-  return serializePuppeteer(async () => {
+  return serializePuppeteer(`scrape-events-${monthYear}`, async () => {
     console.log(
       `🕷️ Launching Puppeteer to scrape calendar events for [${monthYear}]...`,
     );
