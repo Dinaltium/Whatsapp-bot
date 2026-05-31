@@ -505,10 +505,27 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     try {
-      const query = ctx.cmdArgs.join(" ").trim().toLowerCase();
-      if (!query) {
-        await sendBotReply(ctx.sock, ctx.from, "Usage: !findchats <name-or-jid-keyword>");
-        return;
+      const rawArgs = ctx.cmdArgs.join(" ").trim();
+      let filter = "";
+      let page = 1;
+
+      // Extract -f filter
+      const filterMatch = rawArgs.match(/-f\s+([^\-]+)/i);
+      if (filterMatch) {
+        filter = filterMatch[1].trim().toLowerCase();
+      } else {
+        // Fallback: If they just typed "!findchats keyword" without -f or -p, use the whole string as filter
+        const noFlagsMatch = rawArgs.match(/^[^\-]*$/);
+        if (noFlagsMatch && rawArgs.length > 0) {
+          filter = rawArgs.toLowerCase();
+        }
+      }
+
+      // Extract -p page
+      const pageMatch = rawArgs.match(/-p\s+(\d+)/i);
+      if (pageMatch) {
+        page = parseInt(pageMatch[1], 10);
+        if (isNaN(page) || page < 1) page = 1;
       }
 
       const allContacts = await redis.hgetall("contact_names");
@@ -517,18 +534,41 @@ registerCommand({
         return;
       }
 
-      const matches = Object.entries(allContacts)
-        .filter(([jid, name]) => {
-          return jid.toLowerCase().includes(query) || name.toLowerCase().includes(query);
-        })
-        .slice(0, 30);
+      let entries = Object.entries(allContacts);
 
-      if (matches.length === 0) {
-        await sendBotReply(ctx.sock, ctx.from, `No cached contacts matched your query: "${query}"`);
-      } else {
-        const formatted = matches.map(([jid, name], idx) => `${idx + 1}. ${name} | JID: ${jid}`);
-        await sendBotReply(ctx.sock, ctx.from, `Matching chats found in cache:\n${formatted.join("\n")}`);
+      if (filter) {
+        entries = entries.filter(([jid, name]) => {
+          return jid.toLowerCase().includes(filter) || name.toLowerCase().includes(filter);
+        });
       }
+
+      if (entries.length === 0) {
+        const msg = filter ? `No cached contacts matched your query: "${filter}"` : "No contacts found.";
+        await sendBotReply(ctx.sock, ctx.from, msg);
+        return;
+      }
+
+      const PAGE_SIZE = 20;
+      const totalItems = entries.length;
+      const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+
+      if (page > totalPages) page = totalPages;
+
+      const startIndex = (page - 1) * PAGE_SIZE;
+      const paginatedEntries = entries.slice(startIndex, startIndex + PAGE_SIZE);
+
+      const formatted = paginatedEntries.map(([jid, name], idx) => {
+        return `${startIndex + idx + 1}. ${name} | JID: ${jid}`;
+      });
+
+      let header = filter
+        ? `*Chats Matching: "${filter}"*\n`
+        : `*All Cached Chats*\n`;
+      header += `Page ${page} of ${totalPages} (${totalItems} total contacts)\n\n`;
+
+      const footer = `\n\nUse !findchats ${filter ? `-f ${filter} ` : ""}-p ${page + 1} for the next page.`;
+
+      await sendBotReply(ctx.sock, ctx.from, `${header}${formatted.join("\n")}${page < totalPages ? footer : ""}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await sendBotReply(ctx.sock, ctx.from, `Failed to search chats:\n${msg}`);
