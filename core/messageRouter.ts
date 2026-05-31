@@ -1,5 +1,6 @@
 import { default as makeWASocket, proto } from "@whiskeysockets/baileys";
 import WhatsAppAgent from "../agents/WhatsAppAgent";
+import SelfAgent from "../agents/SelfAgent";
 
 import groupConfig from "../config/groupAllowlist";
 import chatConfig from "../config/chatAllowlist";
@@ -23,6 +24,7 @@ import {
   formatRetryAfter,
   incrementGlobalDailyAiCount,
   clearRateLimitNotice,
+  checkGlobalUserLimit,
 } from "../security/rateLimiter";
 import {
   handleCreateCommand,
@@ -49,6 +51,7 @@ import {
 } from "../bot";
 import { redis } from "../storage/redisClient";
 import { logEvent } from "../utils/logger";
+import { cacheMessageForContext } from "../utils/contextWindow";
 
 function unwrapMessage(message: any): any {
   if (!message) return null;
@@ -130,30 +133,57 @@ export async function handleMessageUpsert(
       }
     }
 
-    // ── SELF BOT (ADMIN ONLY, !! PREFIX) ──
-    if (text && text.startsWith("!!")) {
-      const isAdmin = isAdminSender(msg, senderId);
-      if (isAdmin) {
-        const prompt = text.slice(2).trim();
-        if (prompt) {
-          const sessionKey = buildSessionKey(from || "", senderId);
-          const session = await getSession(sessionKey);
-          addSessionMessage(session, "user", prompt);
+    // ── CONTEXT CACHING (for !!context, !!summarize, !!tldr features) ─────
+    if (text && !msg.key?.fromMe && senderId) {
+      try {
+        const senderName = await safeGetContactName(senderId);
+        await cacheMessageForContext(
+          from,
+          msg.key?.id || "",
+          senderName,
+          text,
+          Date.now(),
+        );
+      } catch {
+        /* non-fatal */
+      }
+    }
 
-          const { getGroqReply } = await import("../ai/groqClient");
-          const aiReply = await getGroqReply(
-            session.messages,
+    // ── SELF BOT (ADMIN ONLY, !! PREFIX) ─────────────────────────────────────
+    // Prevent !!! (triple) from triggering SELF — must be exactly !!
+    if (text && text.startsWith("!!") && !text.startsWith("!!!")) {
+      const isAdmin = isAdminSender(msg, senderId);
+      if (!isAdmin) {
+        continue; // silent ignore for non-admins
+      }
+      const prompt = text.slice(2).trim();
+      if (prompt) {
+        const sessionKey = buildSessionKey(from || "", senderId);
+        const session = await getSession(sessionKey);
+        try {
+          const selfResult = await SelfAgent.handleMessage(
+            session,
+            prompt,
             GROQ_API_KEY,
             GROQ_MODEL,
-            "You are a highly capable AI assistant reserved exclusively for the bot administrator. You have no domain restrictions and should assist the admin with anything they need.",
+            sock,
+            msg,
+            from || "",
+            senderId,
           );
-
-          addSessionMessage(session, "assistant", aiReply);
-          await saveSession(sessionKey, session);
-          await sendBotReply(sock, from || "", aiReply);
+          if (selfResult.reply) {
+            await sendBotReply(sock, from || "", selfResult.reply);
+          }
+          if (selfResult.usedAI) {
+            addSessionMessage(session, "user", prompt);
+            addSessionMessage(session, "assistant", selfResult.reply);
+            await saveSession(sessionKey, session);
+          }
+        } catch (err) {
+          console.error("[SELF] Handler error:", err);
         }
-        continue;
       }
+      continue;
     }
 
     // ── MAJESTIC REVEAL INTERCEPTOR (NO PREFIX REQUIRED) ──
@@ -181,6 +211,23 @@ export async function handleMessageUpsert(
 
     if (await shouldSkipMessage(sock, msg, from, text, senderId)) {
       continue;
+    }
+
+    // ── GLOBAL USER RATE LIMIT (non-admins only) ───────────────────────
+    if (!isAdminSender(msg, senderId)) {
+      const globalCheck = await checkGlobalUserLimit(senderId);
+      if (!globalCheck.allowed) {
+        if (
+          await shouldSendRateLimitNotice(from || "", senderId, globalCheck)
+        ) {
+          await sendBotReply(
+            sock,
+            from || "",
+            "You have reached the global usage limit. Please wait before sending more commands.",
+          );
+        }
+        continue;
+      }
     }
 
     const command = text!.toLowerCase();
@@ -305,6 +352,19 @@ export async function handleMessageUpsert(
             JSON.stringify({ botNumber: pending.botNumber }),
           );
           const groupName = await safeGetGroupName(sock, pending.jid);
+          // Clear sessions for the reassigned group (Task 3.5)
+          try {
+            const sessionPattern = `session:${pending.jid}:*`;
+            const sessionKeys = await redis.keys(sessionPattern);
+            if (sessionKeys.length > 0) {
+              await redis.del(...sessionKeys);
+              console.log(
+                `[SessionClear] Cleared ${sessionKeys.length} sessions for reassigned group`,
+              );
+            }
+          } catch {
+            /* non-fatal */
+          }
           await sendBotReply(
             sock,
             from || "",
@@ -345,6 +405,19 @@ export async function handleMessageUpsert(
             JSON.stringify({ botNumber: pending.botNumber }),
           );
           const name = await safeGetContactName(pending.jid);
+          // Clear sessions for the reassigned chat (Task 3.5)
+          try {
+            const sessionPattern = `session:${pending.jid}:*`;
+            const sessionKeys = await redis.keys(sessionPattern);
+            if (sessionKeys.length > 0) {
+              await redis.del(...sessionKeys);
+              console.log(
+                `[SessionClear] Cleared ${sessionKeys.length} sessions for reassigned chat`,
+              );
+            }
+          } catch {
+            /* non-fatal */
+          }
           await sendBotReply(
             sock,
             from || "",
