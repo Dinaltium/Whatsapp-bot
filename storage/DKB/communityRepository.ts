@@ -26,6 +26,7 @@ export async function scrapeClubsLive(): Promise<Club[]> {
     console.log("Launching Puppeteer to scrape communities...");
     const browser = await puppeteer.launch({
       headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
