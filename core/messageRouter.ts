@@ -7,6 +7,7 @@ import chatConfig from "../config/chatAllowlist";
 import { getJidHash, logStructured, logEvent } from "../utils/logger";
 import { normalizeJid, getSenderId, isAdminSender, isAdminAction } from "../security/rbac";
 import { resolveSenderId } from "./middleware/lidResolver";
+import { isHistoricalMessage, isDuplicateMessage } from "./middleware/antiReplay";
 import {
   checkAiRateLimit,
   checkGroupAndGlobalLimits,
@@ -51,19 +52,8 @@ export async function handleMessageUpsert(
 
       if (!from) continue;
 
-      // ── ANTI-REPLAY: DISCARD HISTORICAL MESSAGES ON RECONNECT STORM ──
-      const messageTimestamp = msg.messageTimestamp;
-      if (messageTimestamp) {
-        const messageAgeSeconds = Math.floor(Date.now() / 1000) - Number(messageTimestamp);
-        if (messageAgeSeconds > 120) {
-          logEvent("debug", {
-            event: "historical_message_discarded",
-            msgId: msg.key?.id,
-            ageSeconds: messageAgeSeconds,
-          });
-          continue;
-        }
-      }
+      // ── ANTI-REPLAY GUARDS ──
+      if (isHistoricalMessage(msg)) continue;
 
       // ── CACHE LATEST VIEW-ONCE MESSAGE ──────────────────────────────────
       if (msg.message) {
@@ -78,13 +68,7 @@ export async function handleMessageUpsert(
         }
       }
 
-      if (msg.key?.id) {
-        const isSet = await redis.set(`msg_idemp:${msg.key.id}`, "1", "EX", 86400, "NX");
-        if (!isSet) {
-          logEvent("debug", { event: "duplicate_message_dropped", msgId: msg.key.id });
-          continue;
-        }
-      }
+      if (await isDuplicateMessage(msg)) continue;
 
       if (from.endsWith("@g.us")) {
         await redis.setex(`last_group_interaction:${from}`, 24 * 60 * 60, Date.now().toString());
