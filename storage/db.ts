@@ -216,6 +216,13 @@ export async function ensureSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS ecb_projects (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       INSERT INTO rbac_roles (name, description)
       VALUES ('mentor', 'Can manage mentor intake and mentor directory records')
       ON CONFLICT (name) DO NOTHING;

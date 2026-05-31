@@ -1,4 +1,5 @@
 import { ECB_HEADER, HELP_TEXT, DEFAULT_TEXT } from "./intro";
+import { getEcbProjects } from "../../storage/ECB/ecbRepository";
 
 interface ConversationMessage {
   role: "user" | "assistant";
