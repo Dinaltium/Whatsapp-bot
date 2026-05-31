@@ -19,7 +19,10 @@ export async function searchWithTavily(query: string): Promise<SearchResponse> {
       }),
     });
 
-    if (!res.ok) return empty;
+    if (!res.ok) {
+      console.error("[Tavily] HTTP Error:", res.status, await res.text());
+      return empty;
+    }
     const data = await res.json();
 
     const results = (data.results || []).map((r: any) => ({
