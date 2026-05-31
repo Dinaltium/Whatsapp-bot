@@ -27,6 +27,7 @@ const COMMUNITY_SPECIFIC = [
 const COMMUNITY_CONTEXTUAL = [
   "meetup",
   "event",
+  "events",
   "collab",
   "collaboration",
   "partner",
@@ -56,6 +57,8 @@ const DK24_ANCHORS = [
   "club",
   "clubs",
   "member",
+  "mangalore", // DK24 is Mangalore-based
+  "mangaluru",
 ];
 
 export function isCommunityQuery(query: string | null | undefined): boolean {
@@ -68,7 +71,9 @@ export function isCommunityQuery(query: string | null | undefined): boolean {
   }
 
   // Tier 2: Contextual keywords only match if a DK24 anchor is also present
-  const hasContextual = COMMUNITY_CONTEXTUAL.some((kw) => normalized.includes(kw));
+  const hasContextual = COMMUNITY_CONTEXTUAL.some((kw) =>
+    normalized.includes(kw),
+  );
   const hasAnchor = DK24_ANCHORS.some((anchor) => normalized.includes(anchor));
   return hasContextual && hasAnchor;
 }
