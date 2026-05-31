@@ -1,4 +1,4 @@
-import { ECB_HEADER, HELP_TEXT, DEFAULT_TEXT } from "./intro";
+import { HELP_TEXT, DEFAULT_TEXT } from "./intro";
 import { getProjects, getEvents, getDeadlines } from "../../storage/ECB/ecbRepository";
 
 interface ConversationMessage {
@@ -21,9 +21,9 @@ interface AgentResult {
 function formatBotReply(text: string): string {
   const cleanedText = String(text || "").trim();
   if (!cleanedText) {
-    return ECB_HEADER;
+    return "";
   }
-  return `${ECB_HEADER}\n\n${cleanedText}`;
+  return cleanedText;
 }
 
 export async function handleMessage(

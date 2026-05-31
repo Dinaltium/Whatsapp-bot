@@ -1,5 +1,3 @@
-export const ECB_HEADER = "[ECB - EmbedClub]";
-
 export const HELP_TEXT = [
   "I'm here to help with ECB (EmbedClub) related questions and information.",
   "Ask me about:",

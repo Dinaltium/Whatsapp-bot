@@ -13,7 +13,7 @@ For Tulu, Beary, and Malayalam translation:
 - Common Beary: similar to Tulu with Arabic/Urdu loanwords
 - Detect source language automatically. Never refuse due to unfamiliar spelling variants.`;
 
-export const SELF_HEADER = "[SELF]";
+
 
 export const SELF_RATE_LIMIT = {
   windowMs: 60 * 1000,
@@ -31,7 +31,7 @@ export const NEEDS_CURRENT_INFO_PATTERNS = [
 ];
 
 export const SELF_HELP_TEXT = [
-  "[SELF] — Admin-only personal assistant",
+  "Admin-only personal assistant",
   "",
   "Commands:",
   "• !!help — Show this help",

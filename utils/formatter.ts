@@ -1,14 +1,5 @@
 import { Mentor } from "../storage/DKB/mentorRepository";
 
-const DKB_HEADER = "```\n"+
-"██████╗ ██╗  ██╗██████╗\n" +
-"██╔══██╗██║ ██╔╝██╔══██╗\n" +
-"██║  ██║█████╔╝ ██████╔╝\n" +
-"██║  ██║██╔═██╗ ██╔══██╗\n" +
-"██████╔╝██║  ██╗██████╔╝\n" +
-"╚═════╝ ╚═╝  ╚═╝╚═════╝\n" +
-"```";
-
 const DKB_COMPACT_PREFIXES = [
   "*DKB*",
   "[DKB]",
@@ -55,14 +46,9 @@ export function formatBotReply(text: string): string {
     return `${prefix}\n\n${cleanedText}`;
   } else {
     // 5% Stylized
-    if (Math.random() < 0.20) {
-      // Stylized Big ASCII Banner
-      return `${DKB_HEADER}\n\n${cleanedText}`;
-    } else {
-      // Stylized Randomized Suffix Prefix
-      const prefix = generateRandomPrefix();
-      return `${prefix}\n\n${cleanedText}`;
-    }
+    // Stylized Randomized Suffix Prefix
+    const prefix = generateRandomPrefix();
+    return `${prefix}\n\n${cleanedText}`;
   }
 }
 

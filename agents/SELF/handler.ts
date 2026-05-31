@@ -3,7 +3,6 @@ import { UserSession } from "../../core/state";
 import { AgentResult } from "../core/BotHandler";
 import {
   SELF_SYSTEM_PROMPT,
-  SELF_HEADER,
   SELF_RATE_LIMIT,
   SELF_HELP_TEXT,
 } from "./intro";
@@ -62,13 +61,7 @@ function loadDocFile(filename: string): string | null {
   return null;
 }
 
-function formatSearchResponse(res: any): string {
-  if (!res || !res.results || res.results.length === 0) return "";
-  let out = "";
-  if (res.answer) out += `Direct Answer: ${res.answer}\n\n`;
-  out += res.results.map((r: any) => `Title: ${r.title}\nURL: ${r.url}\nContent: ${r.content}`).join("\n\n");
-  return out;
-}
+
 
 function getQuotedText(msg: proto.IWebMessageInfo): string | null {
   const ext = msg.message?.extendedTextMessage;
@@ -103,7 +96,7 @@ export async function handleMessage(
   if (count > SELF_RATE_LIMIT.maxRequests) {
     if (count === SELF_RATE_LIMIT.maxRequests + 1) {
       return {
-        reply: `${SELF_HEADER} Rate limit: ${SELF_RATE_LIMIT.maxRequests} requests/minute. Slowing down.`,
+        reply: `Rate limit: ${SELF_RATE_LIMIT.maxRequests} requests/minute. Slowing down.`,
         usedAI: false,
       };
     }
@@ -188,8 +181,8 @@ export async function handleMessage(
     if (!groqApiKey) {
       return {
         reply: docContent
-          ? `${SELF_HEADER}\n\n${docContent.slice(0, 2000)}`
-          : `${SELF_HEADER} No documentation found for "${topic}".`,
+          ? `${docContent.slice(0, 2000)}`
+          : `No documentation found for "${topic}".`,
         usedAI: false,
       };
     }
@@ -205,7 +198,7 @@ export async function handleMessage(
       systemPrompt,
     );
 
-    return { reply: `${SELF_HEADER}\n\n${aiReply}`, usedAI: true };
+    return { reply: `${aiReply}`, usedAI: true };
   }
 
   // ── !!remind <time> <message> ─────────────────────────────────────────
@@ -245,7 +238,7 @@ export async function handleMessage(
 
     if (!parsedTime || !reminderMsg) {
       return {
-        reply: `${SELF_HEADER} Could not parse reminder time.\nUsage: !!remind in 5 minutes call John\nOr: !!remind tomorrow 9am meeting`,
+        reply: `Could not parse reminder time.\nUsage: !!remind in 5 minutes call John\nOr: !!remind tomorrow 9am meeting`,
         usedAI: false,
       };
     }
@@ -253,12 +246,12 @@ export async function handleMessage(
     const id = await addReminder(senderId, from, reminderMsg, parsedTime);
     if (id) {
       return {
-        reply: `${SELF_HEADER} Reminder set for ${formatISTDate(parsedTime)}: ${reminderMsg}`,
+        reply: `Reminder set for ${formatISTDate(parsedTime)}: ${reminderMsg}`,
         usedAI: false,
       };
     } else {
       return {
-        reply: `${SELF_HEADER} Failed to save reminder. Database may be unavailable.`,
+        reply: `Failed to save reminder. Database may be unavailable.`,
         usedAI: false,
       };
     }
@@ -268,13 +261,13 @@ export async function handleMessage(
   if (cmd === "reminders") {
     const reminders = await getPendingReminders(senderId);
     if (!reminders.length) {
-      return { reply: `${SELF_HEADER} No pending reminders.`, usedAI: false };
+      return { reply: `No pending reminders.`, usedAI: false };
     }
     const lines = reminders.map(
       (r) => `ID: ${r.id} | ${r.message} | Due: ${formatISTDate(r.remind_at)}`,
     );
     return {
-      reply: `${SELF_HEADER} Pending reminders:\n${lines.join("\n")}`,
+      reply: `Pending reminders:\n${lines.join("\n")}`,
       usedAI: false,
     };
   }
@@ -285,15 +278,15 @@ export async function handleMessage(
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
       return {
-        reply: `${SELF_HEADER} Usage: !!delremind <id>`,
+        reply: `Usage: !!delremind <id>`,
         usedAI: false,
       };
     }
     const ok = await deleteReminder(id, senderId);
     return {
       reply: ok
-        ? `${SELF_HEADER} Reminder ${id} deleted.`
-        : `${SELF_HEADER} Reminder ${id} not found.`,
+        ? `Reminder ${id} deleted.`
+        : `Reminder ${id} not found.`,
       usedAI: false,
     };
   }
@@ -304,14 +297,14 @@ export async function handleMessage(
     const quotedMsgId = getQuotedMsgId(msg);
     if (!quotedMsgId || !groqApiKey) {
       return {
-        reply: `${SELF_HEADER} Reply to a message with !!translate all <lang> to translate the thread.`,
+        reply: `Reply to a message with !!translate all <lang> to translate the thread.`,
         usedAI: false,
       };
     }
     const messages = await getContextFromMessage(from, quotedMsgId, 30);
     if (!messages.length) {
       return {
-        reply: `${SELF_HEADER} No context found from that message.`,
+        reply: `No context found from that message.`,
         usedAI: false,
       };
     }
@@ -327,7 +320,7 @@ export async function handleMessage(
       GROQ_MODEL_DEFAULT,
       SELF_SYSTEM_PROMPT,
     );
-    return { reply: `${SELF_HEADER}\n\n${aiReply}`, usedAI: true };
+    return { reply: `${aiReply}`, usedAI: true };
   }
 
   // ── !!translate <lang> <text> (or reply) ─────────────────────────────
@@ -340,13 +333,13 @@ export async function handleMessage(
 
     if (!lang || !textToTranslate) {
       return {
-        reply: `${SELF_HEADER} Usage: !!translate <lang> <text> (or reply to a message)`,
+        reply: `Usage: !!translate <lang> <text> (or reply to a message)`,
         usedAI: false,
       };
     }
     if (!groqApiKey) {
       return {
-        reply: `${SELF_HEADER} Groq API key missing for translation.`,
+        reply: `Groq API key missing for translation.`,
         usedAI: false,
       };
     }
@@ -356,7 +349,7 @@ export async function handleMessage(
       GROQ_MODEL_DEFAULT,
       SELF_SYSTEM_PROMPT,
     );
-    return { reply: `${SELF_HEADER}\n\n${aiReply}`, usedAI: true };
+    return { reply: `${aiReply}`, usedAI: true };
   }
 
   // ── !!context / !!summarize (reply) ──────────────────────────────────
@@ -364,7 +357,7 @@ export async function handleMessage(
     const quotedMsgId = getQuotedMsgId(msg);
     if (!groqApiKey) {
       return {
-        reply: `${SELF_HEADER} Groq API key missing.`,
+        reply: `Groq API key missing.`,
         usedAI: false,
       };
     }
@@ -376,7 +369,7 @@ export async function handleMessage(
     }
     if (!messages.length) {
       return {
-        reply: `${SELF_HEADER} No cached context available for this chat.`,
+        reply: `No cached context available for this chat.`,
         usedAI: false,
       };
     }
@@ -393,7 +386,7 @@ export async function handleMessage(
       SELF_SYSTEM_PROMPT,
     );
     return {
-      reply: `${SELF_HEADER} Context Summary (${messages.length} messages):\n\n${aiReply}`,
+      reply: `Context Summary (${messages.length} messages):\n\n${aiReply}`,
       usedAI: true,
     };
   }
@@ -403,7 +396,7 @@ export async function handleMessage(
     const countStr = raw.slice("tldr".length).trim();
     const count2 = parseInt(countStr || "20", 10);
     if (!groqApiKey) {
-      return { reply: `${SELF_HEADER} Groq API key missing.`, usedAI: false };
+      return { reply: `Groq API key missing.`, usedAI: false };
     }
     const messages = await getRecentMessages(
       from,
@@ -411,7 +404,7 @@ export async function handleMessage(
     );
     if (!messages.length) {
       return {
-        reply: `${SELF_HEADER} No cached messages available.`,
+        reply: `No cached messages available.`,
         usedAI: false,
       };
     }
@@ -427,7 +420,7 @@ export async function handleMessage(
       GROQ_MODEL_DEFAULT,
       SELF_SYSTEM_PROMPT,
     );
-    return { reply: `${SELF_HEADER}\n\n${aiReply}`, usedAI: true };
+    return { reply: `${aiReply}`, usedAI: true };
   }
 
   // ── !!tone (reply) ────────────────────────────────────────────────────
@@ -435,12 +428,12 @@ export async function handleMessage(
     const quotedText = getQuotedText(msg);
     if (!quotedText) {
       return {
-        reply: `${SELF_HEADER} Reply to a message with !!tone to detect its emotional tone.`,
+        reply: `Reply to a message with !!tone to detect its emotional tone.`,
         usedAI: false,
       };
     }
     if (!groqApiKey) {
-      return { reply: `${SELF_HEADER} Groq API key missing.`, usedAI: false };
+      return { reply: `Groq API key missing.`, usedAI: false };
     }
     const aiReply = await getGroqReply(
       [
@@ -453,7 +446,7 @@ export async function handleMessage(
       GROQ_MODEL_DEFAULT,
       SELF_SYSTEM_PROMPT,
     );
-    return { reply: `${SELF_HEADER} Tone: ${aiReply.trim()}`, usedAI: true };
+    return { reply: `Tone: ${aiReply.trim()}`, usedAI: true };
   }
 
   // ── !!find <keyword> ─────────────────────────────────────────────────
@@ -461,7 +454,7 @@ export async function handleMessage(
     const keyword = raw.slice("find ".length).trim().toLowerCase();
     if (!keyword) {
       return {
-        reply: `${SELF_HEADER} Usage: !!find <keyword>`,
+        reply: `Usage: !!find <keyword>`,
         usedAI: false,
       };
     }
@@ -471,7 +464,7 @@ export async function handleMessage(
     );
     if (!matches.length) {
       return {
-        reply: `${SELF_HEADER} No messages found containing "${keyword}".`,
+        reply: `No messages found containing "${keyword}".`,
         usedAI: false,
       };
     }
@@ -482,7 +475,7 @@ export async function handleMessage(
       return `[${ts} IST] ${m.senderName}: ${m.text.slice(0, 120)}`;
     });
     return {
-      reply: `${SELF_HEADER} Found ${matches.length} message(s) containing "${keyword}":\n\n${lines.join("\n")}`,
+      reply: `Found ${matches.length} message(s) containing "${keyword}":\n\n${lines.join("\n")}`,
       usedAI: false,
     };
   }
@@ -494,13 +487,13 @@ export async function handleMessage(
 
     if (!textToSpeak) {
       return {
-        reply: `${SELF_HEADER} Usage: !!voice <text> (or reply to a message)`,
+        reply: `Usage: !!voice <text> (or reply to a message)`,
         usedAI: false,
       };
     }
     if (!groqApiKey) {
       return {
-        reply: `${SELF_HEADER} Groq API key missing for TTS.`,
+        reply: `Groq API key missing for TTS.`,
         usedAI: false,
       };
     }
@@ -508,7 +501,7 @@ export async function handleMessage(
     const limitCheck = await checkVoiceLimit();
     if (!limitCheck.allowed) {
       return {
-        reply: `${SELF_HEADER} Voice limit reached today (${limitCheck.count}/${SELF_RATE_LIMIT.voiceDailyLimit}). Resets at midnight IST.`,
+        reply: `Voice limit reached today (${limitCheck.count}/${SELF_RATE_LIMIT.voiceDailyLimit}). Resets at midnight IST.`,
         usedAI: false,
       };
     }
@@ -516,7 +509,7 @@ export async function handleMessage(
     const result = await generateVoiceMessage(textToSpeak, groqApiKey);
     if (!result.success || !result.audioBuffer) {
       return {
-        reply: `${SELF_HEADER} Voice generation failed. Groq TTS may be temporarily unavailable.`,
+        reply: `Voice generation failed. Groq TTS may be temporarily unavailable.`,
         usedAI: false,
       };
     }
@@ -530,7 +523,7 @@ export async function handleMessage(
     } catch (err) {
       console.error("[SELF] Failed to send voice message:", err);
       return {
-        reply: `${SELF_HEADER} Voice generated but failed to send.`,
+        reply: `Voice generated but failed to send.`,
         usedAI: false,
       };
     }
@@ -543,12 +536,12 @@ export async function handleMessage(
     const quotedText = getQuotedText(msg);
     if (!quotedText) {
       return {
-        reply: `${SELF_HEADER} Reply to a message with !!reply <style>. Styles: formal, casual, decline, agree`,
+        reply: `Reply to a message with !!reply <style>. Styles: formal, casual, decline, agree`,
         usedAI: false,
       };
     }
     if (!groqApiKey) {
-      return { reply: `${SELF_HEADER} Groq API key missing.`, usedAI: false };
+      return { reply: `Groq API key missing.`, usedAI: false };
     }
     const aiReply = await getGroqReply(
       [
@@ -562,7 +555,7 @@ export async function handleMessage(
       SELF_SYSTEM_PROMPT,
     );
     return {
-      reply: `${SELF_HEADER} Draft reply (${style}):\n${aiReply}`,
+      reply: `Draft reply (${style}):\n${aiReply}`,
       usedAI: true,
     };
   }
@@ -572,20 +565,19 @@ export async function handleMessage(
     const query = raw.slice("search ".length).trim();
     if (!query) {
       return {
-        reply: `${SELF_HEADER} Usage: !!search <query>`,
+        reply: `Usage: !!search <query>`,
         usedAI: false,
       };
     }
     
     console.info(`[SELF] Executing explicit web search for query: "${query}"`);
-    const searchResult = await searchWeb(query);
-    const searchContext = formatSearchResponse(searchResult);
+    const searchContext = await searchWeb(query);
     
     if (!groqApiKey) {
       return {
         reply: searchContext
-          ? `${SELF_HEADER}\n\n${searchContext}`
-          : `${SELF_HEADER} No results found for "${query}".`,
+          ? `${searchContext}`
+          : `No results found for "${query}".`,
         usedAI: false,
       };
     }
@@ -598,13 +590,13 @@ export async function handleMessage(
       GROQ_MODEL_SCOUT,
       systemWithSearch,
     );
-    return { reply: `${SELF_HEADER}\n\n${aiReply}`, usedAI: true };
+    return { reply: `${aiReply}`, usedAI: true };
   }
 
   // ── General AI (with optional web search for current info) ───────────
   if (!groqApiKey) {
     return {
-      reply: `${SELF_HEADER} Groq API key missing.`,
+      reply: `Groq API key missing.`,
       usedAI: false,
     };
   }
@@ -614,8 +606,7 @@ export async function handleMessage(
 
   if (requiresCurrentInfo(raw)) {
     console.info(`[SELF] Current info pattern detected in prompt. Triggering web search.`);
-    const searchResult = await searchWeb(raw);
-    const searchContext = formatSearchResponse(searchResult);
+    const searchContext = await searchWeb(raw);
     
     if (searchContext) {
       console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
@@ -641,5 +632,6 @@ export async function handleMessage(
     systemPrompt,
   );
 
-  return { reply: `${SELF_HEADER}\n\n${aiReply}`, usedAI: true };
+  return { reply: `${aiReply}`, usedAI: true };
 }
+
