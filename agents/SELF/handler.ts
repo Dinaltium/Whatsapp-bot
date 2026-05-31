@@ -160,7 +160,8 @@ export async function handleMessage(
     ) {
       docContent = loadDocFile("architecture.md");
     } else {
-      // Try to load any doc containing the topic
+      // If no specific doc is requested, load ALL documentation so the AI has 
+      // complete architectural context and doesn't hallucinate its own tech stack
       const allDocs = [
         "architecture.md",
         "baileys-overview.md",
@@ -169,12 +170,17 @@ export async function handleMessage(
         "bot-ecb.md",
         "bot-self.md",
       ];
-      for (const d of allDocs) {
-        const content = loadDocFile(d);
-        if (content && content.toLowerCase().includes(topic)) {
-          docContent = content;
-          break;
-        }
+      
+      const combinedDocs = allDocs
+        .map((d) => {
+          const content = loadDocFile(d);
+          return content ? `--- ${d} ---\n${content}` : null;
+        })
+        .filter((content) => content !== null)
+        .join("\n\n");
+        
+      if (combinedDocs.trim().length > 0) {
+        docContent = combinedDocs;
       }
     }
 
