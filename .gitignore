@@ -47,3 +47,9 @@ test.ts
 security.md
 projectStructure.md
 commands.md
+prompt-review.md
+prompt.md
+
+# Test suite
+tests/
+
