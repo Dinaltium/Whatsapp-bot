@@ -28,7 +28,9 @@ const AI_SESSION_TTL_MS = 15 * 60 * 1000;
 const AI_MAX_SESSION_MESSAGES = 8;
 
 let activeSocket: any = null;
-export function getActiveSocket() { return activeSocket; }
+export function getActiveSocket() {
+  return activeSocket;
+}
 
 interface UserSession {
   domainUnlocked: boolean;
@@ -74,7 +76,6 @@ interface UserSession {
 }
 
 const userAiSessions = new Map<string, UserSession>();
-const lastSentMessages = new Map<string, string>();
 
 function printBanner(): void {
   console.log("\nWhatsApp Bot Coordinator Online.");
@@ -85,6 +86,22 @@ export async function sendBotReply(
   to: string,
   text: string,
 ): Promise<void> {
+  // ── OUTGOING RATE GUARD (Task 3.2) ────────────────────────────
+  try {
+    const { redis } = await import("./storage/redisClient");
+    const minuteKey = `outgoing:${to}:${Math.floor(Date.now() / 60000)}`;
+    const outgoingCount = await redis.incr(minuteKey);
+    if (outgoingCount === 1) await redis.expire(minuteKey, 120);
+    if (outgoingCount > 5) {
+      console.warn(
+        `[RateGuard] Suppressed outgoing to ${getJidHash(to)} — limit reached (${outgoingCount}/5)`,
+      );
+      return;
+    }
+  } catch {
+    /* fail open — never block on Redis error */
+  }
+
   try {
     // Notify composing/typing presence
     await sock.sendPresenceUpdate("composing", to);
@@ -102,7 +119,14 @@ export async function sendBotReply(
   } catch (err) {}
 
   const trimmedText = String(text || "").trim();
-  lastSentMessages.set(to, trimmedText);
+
+  // ── REDIS-BACKED ECHO DETECTION (Task 3.4) ───────────────────────
+  try {
+    const { setLastSentMessage } = await import("./core/state");
+    await setLastSentMessage(to, trimmedText);
+  } catch {
+    /* non-fatal */
+  }
 
   await sock.sendMessage(to, {
     text: trimmedText,
@@ -129,7 +153,10 @@ export function extractMessageText(
   );
 }
 
-export async function safeGetGroupName(sock: any, jid: string): Promise<string> {
+export async function safeGetGroupName(
+  sock: any,
+  jid: string,
+): Promise<string> {
   if (!jid || !jid.endsWith("@g.us")) return "Not a Group";
   try {
     const metadata = await sock.groupMetadata(jid);
@@ -149,7 +176,8 @@ export async function safeGetContactName(jid: string): Promise<string> {
 
     // 2. If it's a LID, try resolving to Phone JID
     if (jid.endsWith("@lid")) {
-      const { resolvePhoneJidFromLid } = await import("./storage/core/rbacRepository");
+      const { resolvePhoneJidFromLid } =
+        await import("./storage/core/rbacRepository");
       const phoneJid = await resolvePhoneJidFromLid(jid);
       if (phoneJid) {
         name = await redis.hget("contact_names", phoneJid);
@@ -189,16 +217,21 @@ export async function shouldSkipMessage(
     return true;
   }
 
-  // Anti-echo & duplicate bot response suppression
+  // Anti-echo & duplicate bot response suppression (Redis-backed, Task 3.4)
   if (from) {
-    const lastSent = lastSentMessages.get(from);
-    if (lastSent && lastSent === String(text || "").trim()) {
-      logStructured({
-        event: "command_skipped",
-        reason: "echo_detected",
-        userHash: getJidHash(from),
-      });
-      return true;
+    try {
+      const { getLastSentMessage } = await import("./core/state");
+      const lastSent = await getLastSentMessage(from);
+      if (lastSent && lastSent === String(text || "").trim()) {
+        logStructured({
+          event: "command_skipped",
+          reason: "echo_detected",
+          userHash: getJidHash(from),
+        });
+        return true;
+      }
+    } catch {
+      /* non-fatal */
     }
   }
 
@@ -227,9 +260,9 @@ export async function shouldSkipMessage(
           const pid = p.id ? normalizeJid(p.id) : null;
           const plid = p.lid ? normalizeJid(p.lid) : null;
           return (
-            (pid && pid === botJid) ||
-            (plid && plid === botJid)
-          ) && (p.admin === "admin" || p.admin === "superadmin");
+            ((pid && pid === botJid) || (plid && plid === botJid)) &&
+            (p.admin === "admin" || p.admin === "superadmin")
+          );
         });
 
         if (!isBotAdmin) {
@@ -254,7 +287,10 @@ export async function shouldSkipMessage(
         }
       }
     } catch (err) {
-      console.warn("Failed to check announcement status in shouldSkipMessage:", err);
+      console.warn(
+        "Failed to check announcement status in shouldSkipMessage:",
+        err,
+      );
     }
   }
 
@@ -282,8 +318,6 @@ export async function shouldSkipMessage(
     // NOTE: "manage" is NOT here — it has its own RBAC gate inside the handler
     // that allows both admins AND users with the role.manage permission.
   ];
-
-
 
   if (adminOnlyCommands.includes(commandName)) {
     if (!isAdmin) {
@@ -385,7 +419,10 @@ export function buildSessionKey(from: string, senderId: string): string {
   return `${from}:${senderId}`;
 }
 
-export function getOrCreateSession(from: string, senderId: string): UserSession {
+export function getOrCreateSession(
+  from: string,
+  senderId: string,
+): UserSession {
   const sessionKey = buildSessionKey(from, senderId);
 
   if (!userAiSessions.has(sessionKey)) {
@@ -438,7 +475,9 @@ async function startBot(): Promise<void> {
     await redis.ping();
     console.log("Redis ping successful! Ready for caching and rate limiting.");
   } catch (error) {
-    console.error("FATAL: Cannot connect to Redis. Ensure REDIS_URL is correctly set and the server is running.");
+    console.error(
+      "FATAL: Cannot connect to Redis. Ensure REDIS_URL is correctly set and the server is running.",
+    );
     process.exit(1);
   }
 
@@ -513,6 +552,24 @@ async function startBot(): Promise<void> {
 
     if (connection === "open") {
       logStructured({ event: "connection_open", service: "PARAG" });
+
+      // ── BOOT NOTIFICATION TO ADMIN (Task 3.9) ──────────────────
+      const adminEnv = process.env.ADMIN_JIDS || "";
+      const firstAdmin = adminEnv.split(",")[0].trim();
+      if (firstAdmin) {
+        setTimeout(async () => {
+          try {
+            const normalizedAdmin = normalizeJid(firstAdmin);
+            if (normalizedAdmin) {
+              await sock.sendMessage(normalizedAdmin, {
+                text: `[BOT] Online. ${new Date().toISOString()}`,
+              });
+            }
+          } catch (_) {
+            /* non-fatal */
+          }
+        }, 5000);
+      }
     }
 
     if (connection === "close") {
@@ -523,11 +580,11 @@ async function startBot(): Promise<void> {
         event: "connection_closed",
         statusCode,
       });
-      
+
       // Stop the old socket so it doesn't leak
       try {
         if (activeSocket) {
-            activeSocket.ws?.close();
+          activeSocket.ws?.close();
         }
       } catch (e) {}
 
@@ -537,7 +594,10 @@ async function startBot(): Promise<void> {
       } else if (statusCode === DisconnectReason.loggedOut) {
         logStructured({ event: "connection_logout" });
       } else if (statusCode === DisconnectReason.connectionReplaced) {
-        logStructured({ event: "connection_replaced", error: "another_instance" });
+        logStructured({
+          event: "connection_replaced",
+          error: "another_instance",
+        });
         process.exit(0);
       } else {
         logStructured({ event: "reconnecting", reason: "generic_close" });
@@ -551,10 +611,10 @@ async function startBot(): Promise<void> {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     try {
-        const { handleMessageUpsert } = await import("./core/messageRouter");
-        await handleMessageUpsert(sock, messages, type);
+      const { handleMessageUpsert } = await import("./core/messageRouter");
+      await handleMessageUpsert(sock, messages, type);
     } catch (err) {
-        console.error("Error in message router:", err);
+      console.error("Error in message router:", err);
     }
   });
 
