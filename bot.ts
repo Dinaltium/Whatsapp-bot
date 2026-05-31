@@ -14,6 +14,9 @@ import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
 import { getJidHash, logStructured, logEvent } from "./utils/logger";
 import { normalizeJid, isAdminSender } from "./security/rbac";
 import { calculateTypingDelay } from "./utils/typingDelay";
+import { startHealthServer } from "./infrastructure/health/healthServer";
+import { registerContactSyncHandlers } from "./infrastructure/whatsapp/contactSync";
+import { registerLidMapperHandlers } from "./infrastructure/whatsapp/lidMapper";
 
 export const COMMAND_PREFIX = "!";
 export const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -71,61 +74,6 @@ interface UserSession {
 
 const userAiSessions = new Map<string, UserSession>();
 const lastSentMessages = new Map<string, string>();
-
-// Tracks members being watched for their intro message after a
-// "welcome / introduce" trigger in a bot-2 group.
-// Key: normalized sender JID.  Value: { group JID, timestamp }
-const pendingIntros = new Map<
-  string,
-  { groupJid: string; triggeredAt: number }
->();
-const INTRO_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
-setInterval(
-  () => {
-    const now = Date.now();
-    for (const [jid, info] of pendingIntros) {
-      if (now - info.triggeredAt > INTRO_TTL_MS) pendingIntros.delete(jid);
-    }
-  },
-  30 * 60 * 1000,
-);
-
-let isHealthServerStarted = false;
-
-function startHealthServer(): void {
-  if (isHealthServerStarted) {
-    return;
-  }
-
-  isHealthServerStarted = true;
-  const port = Number(process.env.PORT || 3000);
-
-  const server = http.createServer((req, res) => {
-    if (req.url === "/health") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", service: "parag-whatsapp-bot" }));
-      return;
-    }
-
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("PARAG bot is running");
-  });
-
-  server.listen(port, () => {
-    console.log(`Health server listening on port ${port}`);
-  });
-
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err && err.code === "EADDRINUSE") {
-      console.warn(
-        `Health server port ${port} already in use. Continuing without health endpoint.`,
-      );
-      return;
-    }
-    console.error("Health server error:", err);
-    throw err;
-  });
-}
 
 function printBanner(): void {
   console.log("\nWhatsApp Bot Coordinator Online.");
@@ -596,195 +544,8 @@ async function startBot(): Promise<void> {
     }
   });
 
-  // ── LID MAPPING AND NAME CACHING VIA CONTACT SYNC ──────────────────────────────────────────
-  // When Baileys syncs contacts (on startup and updates), each contact object
-  // may have both id (phone JID) and lid (LID). Persist any new mappings and cache names.
-  sock.ev.on("contacts.upsert", async (contacts) => {
-    try {
-      const { storeLidPhoneMapping } = await import("./storage/core/rbacRepository");
-      const { redis } = await import("./storage/redisClient");
-      let stored = 0;
-      let namesStored = 0;
-      for (const contact of contacts) {
-        if (!contact) continue;
-
-        const cid = contact.id ? normalizeJid(contact.id) : null;
-        const clid = (contact as any).lid ? normalizeJid((contact as any).lid) : null;
-        const cpn = (contact as any).phoneNumber ? normalizeJid((contact as any).phoneNumber) : null;
-
-        const name = contact.name || contact.verifiedName || contact.notify;
-
-        if (name) {
-          if (cid) {
-            await redis.hset("contact_names", cid, name);
-            namesStored++;
-          }
-          if (clid && clid !== cid) {
-            await redis.hset("contact_names", clid, name);
-            namesStored++;
-          }
-          if (cpn && cpn !== cid && cpn !== clid) {
-            await redis.hset("contact_names", cpn, name);
-            namesStored++;
-          }
-        }
-
-        let resolvedLid: string | null = null;
-        let resolvedPn: string | null = null;
-
-        // Case A: id is phone JID, lid is LID
-        if (cid && cid.endsWith("@s.whatsapp.net")) {
-          resolvedPn = cid;
-          if (clid && clid.endsWith("@lid")) resolvedLid = clid;
-        }
-        // Case B: id is LID, phoneNumber is phone JID
-        else if (cid && cid.endsWith("@lid")) {
-          resolvedLid = cid;
-          if (cpn && cpn.endsWith("@s.whatsapp.net")) {
-            resolvedPn = cpn;
-          } else if ((contact as any).phone) {
-            const digits = String((contact as any).phone).replace(/\D/g, "");
-            if (digits) resolvedPn = `${digits}@s.whatsapp.net`;
-          }
-        }
-
-        if (resolvedLid && resolvedPn) {
-          await storeLidPhoneMapping(resolvedLid, resolvedPn);
-          stored++;
-        }
-      }
-      if (stored > 0 || namesStored > 0) {
-        logEvent("debug", { event: "contacts_upserted", lidMapped: stored, namesCached: namesStored });
-      }
-    } catch (_e) { /* non-critical */ }
-  });
-
-  sock.ev.on("contacts.update", async (contacts) => {
-    try {
-      const { redis } = await import("./storage/redisClient");
-      const { storeLidPhoneMapping } = await import("./storage/core/rbacRepository");
-      let namesStored = 0;
-      for (const contact of contacts) {
-        if (!contact) continue;
-
-        const cid = contact.id ? normalizeJid(contact.id) : null;
-        const clid = (contact as any).lid ? normalizeJid((contact as any).lid) : null;
-        const cpn = (contact as any).phoneNumber ? normalizeJid((contact as any).phoneNumber) : null;
-
-        const name = contact.name || contact.verifiedName || contact.notify;
-
-        if (name) {
-          if (cid) {
-            await redis.hset("contact_names", cid, name);
-            namesStored++;
-          }
-          if (clid && clid !== cid) {
-            await redis.hset("contact_names", clid, name);
-            namesStored++;
-          }
-          if (cpn && cpn !== cid && cpn !== clid) {
-            await redis.hset("contact_names", cpn, name);
-            namesStored++;
-          }
-        }
-
-        if (clid && cpn) {
-          await storeLidPhoneMapping(clid, cpn);
-        }
-      }
-      if (namesStored > 0) {
-        logEvent("debug", { event: "contacts_updated", namesCached: namesStored });
-      }
-    } catch (_e) { /* non-critical */ }
-  });
-
-  // ── LID MAPPING VIA GROUP PARTICIPANT EVENTS ──────────────────────────────
-  sock.ev.on("group-participants.update", async (update) => {
-    try {
-      const { storeLidPhoneMapping } = await import("./storage/core/rbacRepository");
-      const groupBot = groupConfig.getGroupBot(update.id);
-      const isBot2 = groupBot?.botNumber === 2;
-
-      for (const participant of update.participants || []) {
-        if (!participant) continue;
-        const pid = typeof participant === "string" ? normalizeJid(participant) : (participant.id ? normalizeJid(participant.id) : null);
-        const plid = (participant as any).lid ? normalizeJid((participant as any).lid) : null;
-        const ppn = (participant as any).phoneNumber ? normalizeJid((participant as any).phoneNumber) : null;
-
-        let resolvedLid: string | null = null;
-        let resolvedPn: string | null = null;
-
-        if (pid && pid.endsWith("@s.whatsapp.net")) {
-          resolvedPn = pid;
-          if (plid && plid.endsWith("@lid")) resolvedLid = plid;
-        } else if (pid && pid.endsWith("@lid")) {
-          resolvedLid = pid;
-          if (ppn && ppn.endsWith("@s.whatsapp.net")) {
-            resolvedPn = ppn;
-          } else if ((participant as any).phone) {
-            const digits = String((participant as any).phone).replace(/\D/g, "");
-            if (digits) resolvedPn = `${digits}@s.whatsapp.net`;
-          }
-        }
-
-        if (resolvedLid && resolvedPn) {
-          await storeLidPhoneMapping(resolvedLid, resolvedPn);
-        }
-
-        // Auto-register new participant to pendingIntros if action is 'add' and group is Bot 2
-        if (isBot2 && update.action === "add") {
-          const targetJid = resolvedPn || pid;
-          if (targetJid && !targetJid.endsWith("@g.us")) {
-            pendingIntros.set(targetJid, {
-              groupJid: update.id,
-              triggeredAt: Date.now(),
-            });
-
-            // Also store in Redis so messageRouter can see it
-            import("./core/state").then(({ addPendingIntro }) => {
-              addPendingIntro(targetJid, update.id).catch(err => {
-                console.error("Failed to add pending intro to Redis:", err);
-              });
-            }).catch(err => {
-              console.error("Failed to import state in group-participants.update:", err);
-            });
-
-            logStructured({
-              event: "intro_tracker_watch_add_event",
-              bot: 2,
-              groupHash: getJidHash(update.id),
-              targetHash: getJidHash(targetJid),
-            });
-          }
-        }
-      }
-    } catch (_e) { /* non-critical */ }
-  });
-
-  // ── LID MAPPING VIA NATIVE 6.8.0 EVENT ──────────────────────────────
-  sock.ev.on("lid-mapping.update" as any, async (update: any) => {
-    try {
-      const { storeLidPhoneMapping } = await import("./storage/core/rbacRepository");
-      const items = Array.isArray(update) ? update : [update];
-      let count = 0;
-      for (const item of items) {
-        if (!item) continue;
-        const rawLid = item.lid;
-        const rawPn = item.pn || item.phoneNumber || item.jid || item.id;
-        if (rawLid && rawPn && typeof rawLid === "string" && typeof rawPn === "string") {
-          const normalizedLid = normalizeJid(rawLid);
-          const normalizedPn = normalizeJid(rawPn);
-          if (normalizedLid && normalizedPn && normalizedLid.endsWith("@lid") && normalizedPn.endsWith("@s.whatsapp.net")) {
-            await storeLidPhoneMapping(normalizedLid, normalizedPn);
-            count++;
-          }
-        }
-      }
-      if (count > 0) {
-        logStructured({ event: "lid_mapped_from_event", count });
-      }
-    } catch (_e) { /* non-critical */ }
-  });
+  registerContactSyncHandlers(sock);
+  registerLidMapperHandlers(sock);
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     try {
@@ -793,7 +554,7 @@ async function startBot(): Promise<void> {
     } catch (err) {
         console.error("Error in message router:", err);
     }
-});
+  });
 
   // Handle graceful shutdown for hosting environments like Render
   process.removeAllListeners("SIGTERM");
