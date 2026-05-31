@@ -1,6 +1,8 @@
 import { getJidHash, logStructured } from "../utils/logger";
 import { redis } from "../storage/redisClient";
 
+const GLOBAL_USER_MAX_PER_HOUR = 20;
+
 const AI_WINDOW_MS = 60 * 1000;
 const AI_MAX_REQUESTS_PER_WINDOW = 5;
 const AI_COOLDOWN_MS = 8 * 1000;
@@ -61,7 +63,10 @@ async function getRateLimitState(key: string): Promise<RateLimitState> {
   };
 }
 
-async function saveRateLimitState(key: string, state: RateLimitState): Promise<void> {
+async function saveRateLimitState(
+  key: string,
+  state: RateLimitState,
+): Promise<void> {
   // Store up to 2 hours for active states to auto-prune
   await redis.setex(key, 2 * 60 * 60, JSON.stringify(state));
 }
@@ -83,7 +88,35 @@ export async function getGlobalDailyAiCount(): Promise<number> {
   return count ? parseInt(count, 10) : 0;
 }
 
-export async function checkAiRateLimit(from: string, senderId: string): Promise<RateLimitCheck> {
+export async function checkGlobalUserLimit(
+  senderId: string,
+): Promise<RateLimitCheck> {
+  const adminJids = (process.env.ADMIN_JIDS || "")
+    .split(",")
+    .map((j) => j.trim())
+    .filter(Boolean);
+  if (adminJids.includes(senderId)) {
+    return { allowed: true };
+  }
+
+  const hourBucket = Math.floor(Date.now() / 3600000);
+  const key = `global_rate:${senderId}:${hourBucket}`;
+  try {
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 3600);
+    if (count > GLOBAL_USER_MAX_PER_HOUR) {
+      return { allowed: false, reason: "global_hourly" };
+    }
+    return { allowed: true };
+  } catch {
+    return { allowed: true }; // fail open
+  }
+}
+
+export async function checkAiRateLimit(
+  from: string,
+  senderId: string,
+): Promise<RateLimitCheck> {
   const now = Date.now();
   const key = buildRateLimitKey(from, senderId);
   const state = await getRateLimitState(key);
@@ -106,7 +139,7 @@ export async function checkAiRateLimit(from: string, senderId: string): Promise<
   if (cooldownRemaining > 0) {
     state.consecutiveViolations = (state.consecutiveViolations || 0) + 1;
     state.lastRequestAt = now; // update to prolong cooldown penalty
-    
+
     if (state.consecutiveViolations >= 3) {
       const banCount = (state.banCount || 0) + 1;
       state.banCount = banCount;
@@ -165,7 +198,10 @@ export async function checkAiRateLimit(from: string, senderId: string): Promise<
   };
 }
 
-export async function clearRateLimitNotice(from: string, senderId: string): Promise<void> {
+export async function clearRateLimitNotice(
+  from: string,
+  senderId: string,
+): Promise<void> {
   const key = `rate_limit_notice:${from}:${senderId}`;
   await redis.del(key);
 }
@@ -191,7 +227,11 @@ export async function shouldSendRateLimitNotice(
     }
   }
 
-  await redis.setex(key, 2 * 60 * 60, JSON.stringify({ reason, notifiedAt: Date.now() }));
+  await redis.setex(
+    key,
+    2 * 60 * 60,
+    JSON.stringify({ reason, notifiedAt: Date.now() }),
+  );
   return true;
 }
 
@@ -200,7 +240,9 @@ export function formatRetryAfter(ms: number): string {
   return `${seconds}s`;
 }
 
-async function getGroupRateLimitState(groupJid: string): Promise<GroupRateLimitState> {
+async function getGroupRateLimitState(
+  groupJid: string,
+): Promise<GroupRateLimitState> {
   const key = `group_rate_limit:${groupJid}`;
   const data = await redis.get(key);
   if (data) {
@@ -218,41 +260,56 @@ async function getGroupRateLimitState(groupJid: string): Promise<GroupRateLimitS
   };
 }
 
-async function saveGroupRateLimitState(groupJid: string, state: GroupRateLimitState): Promise<void> {
+async function saveGroupRateLimitState(
+  groupJid: string,
+  state: GroupRateLimitState,
+): Promise<void> {
   const key = `group_rate_limit:${groupJid}`;
   await redis.setex(key, 2 * 60 * 60, JSON.stringify(state));
 }
 
-export async function checkGroupAndGlobalLimits(groupJid: string): Promise<GroupLimitCheck> {
+export async function checkGroupAndGlobalLimits(
+  groupJid: string,
+): Promise<GroupLimitCheck> {
   const now = Date.now();
-  
+
   const globalCount = await getGlobalDailyAiCount();
   if (globalCount >= MAX_GLOBAL_AI_RESPONSES_PER_DAY) {
     return { allowed: false, reason: "global_limit" };
   }
-  
+
   if (!groupJid.endsWith("@g.us")) {
     return { allowed: true };
   }
-  
+
   const state = await getGroupRateLimitState(groupJid);
-  
+
   if (state.mutedUntil > now) {
-    return { allowed: false, reason: "muted", retryAfterMs: state.mutedUntil - now };
+    return {
+      allowed: false,
+      reason: "muted",
+      retryAfterMs: state.mutedUntil - now,
+    };
   }
-  
+
   if (now - state.hourlyWindowStart >= 60 * 60 * 1000) {
     state.hourlyWindowStart = now;
     state.hourlyCount = 0;
   }
   if (state.hourlyCount >= MAX_GROUP_AI_RESPONSES_PER_HOUR) {
     const remainingTime = 60 * 60 * 1000 - (now - state.hourlyWindowStart);
-    return { allowed: false, reason: "hourly_limit", retryAfterMs: remainingTime };
+    return {
+      allowed: false,
+      reason: "hourly_limit",
+      retryAfterMs: remainingTime,
+    };
   }
-  
-  state.burstTimestamps = state.burstTimestamps.filter(t => now - t < BURST_WINDOW_MS);
+
+  state.burstTimestamps = state.burstTimestamps.filter(
+    (t) => now - t < BURST_WINDOW_MS,
+  );
   state.burstTimestamps.push(now);
-  
+
   if (state.burstTimestamps.length > BURST_MAX_MESSAGES) {
     state.mutedUntil = now + MUTE_DURATION_MS;
     await saveGroupRateLimitState(groupJid, state);
@@ -263,7 +320,7 @@ export async function checkGroupAndGlobalLimits(groupJid: string): Promise<Group
     });
     return { allowed: false, reason: "muted", retryAfterMs: MUTE_DURATION_MS };
   }
-  
+
   state.hourlyCount += 1;
   await saveGroupRateLimitState(groupJid, state);
   return { allowed: true };
