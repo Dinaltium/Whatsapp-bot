@@ -96,6 +96,32 @@ export async function handleMessageUpsert(
         }
       }
 
+      // ── SELF BOT (ADMIN ONLY, !! PREFIX) ──
+      if (text && text.startsWith("!!")) {
+        const isAdmin = isAdminSender(msg, senderId);
+        if (isAdmin) {
+          const prompt = text.slice(2).trim();
+          if (prompt) {
+            const sessionKey = buildSessionKey(from || "", senderId);
+            const session = await getSession(sessionKey);
+            addSessionMessage(session, "user", prompt);
+
+            const { getGroqReply } = await import("../ai/groqClient");
+            const aiReply = await getGroqReply(
+              session.messages,
+              GROQ_API_KEY,
+              GROQ_MODEL,
+              "You are a highly capable AI assistant reserved exclusively for the bot administrator. You have no domain restrictions and should assist the admin with anything they need."
+            );
+
+            addSessionMessage(session, "assistant", aiReply);
+            await saveSession(sessionKey, session);
+            await sendBotReply(sock, from || "", aiReply);
+          }
+          continue;
+        }
+      }
+
       // ── MAJESTIC REVEAL INTERCEPTOR (NO PREFIX REQUIRED) ──
       const trimmedText = (text || "").trim().toLowerCase();
       const isMajesticReveal = /^reveal!+$/.test(trimmedText) 
