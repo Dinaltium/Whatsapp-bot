@@ -554,7 +554,10 @@ export async function handleMessageUpsert(
           groqApiKey: GROQ_API_KEY,
           groqModel: GROQ_MODEL,
           isAdmin: isAdminSender(msg, senderId),
-          senderJid: senderId,
+          senderJid: senderId || "",
+          from: from || "",
+          sock,
+          msg,
         },
         botNumber,
       );
