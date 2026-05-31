@@ -1,6 +1,14 @@
 import { getClubs } from "../storage/DKB/communityRepository";
-import { getEventsForMonth, normalizeMonthYear, searchEventsGlobally, Event } from "../storage/DKB/eventRepository";
-import { getMentors, searchMentorsGlobally } from "../storage/DKB/mentorRepository";
+import {
+  getEventsForMonth,
+  normalizeMonthYear,
+  searchEventsGlobally,
+  Event,
+} from "../storage/DKB/eventRepository";
+import {
+  getMentors,
+  searchMentorsGlobally,
+} from "../storage/DKB/mentorRepository";
 import { cleanRole } from "../utils/normalization";
 import { sanitizeForPrompt } from "../security/promptFirewall";
 
@@ -11,11 +19,42 @@ function wrapCDATA(value?: string | null): string {
   return `<![CDATA[${safe}]]>`;
 }
 
-export async function buildDynamicContextPrompt(userPrompt: string): Promise<string> {
+export async function buildDynamicContextPrompt(
+  userPrompt: string,
+): Promise<string> {
+  return Promise.race([
+    _buildDynamicContextPromptInternal(userPrompt),
+    new Promise<string>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Context build timeout after 8s")),
+        8000,
+      ),
+    ),
+  ]).catch((err) => {
+    console.warn(
+      "[PromptBuilder] Timeout or error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return "<community_database>\nContext temporarily unavailable. Answer based on general knowledge.\n</community_database>";
+  });
+}
+
+async function _buildDynamicContextPromptInternal(
+  userPrompt: string,
+): Promise<string> {
   try {
-    const isEventQuery = /\b(?:event|events|meetup|meetups|calendar|schedule|hackathon|hackathons|hackfest|hacktofuture|summit)\b/i.test(userPrompt);
-    const isClubQuery = /\b(?:club|clubs|community|communities|kommunity|sosc|sceptix|finiteloop|core|embed|acm|canara|cosc|devnation|techbots)\b/i.test(userPrompt);
-    const isMentorQuery = /\b(?:mentor|mentors|speaker|expert|advisor|coach|help|guide|teach|learn|contact|connect|recommend)\b/i.test(userPrompt);
+    const isEventQuery =
+      /\b(?:event|events|meetup|meetups|calendar|schedule|hackathon|hackathons|hackfest|hacktofuture|summit)\b/i.test(
+        userPrompt,
+      );
+    const isClubQuery =
+      /\b(?:club|clubs|community|communities|kommunity|sosc|sceptix|finiteloop|core|embed|acm|canara|cosc|devnation|techbots)\b/i.test(
+        userPrompt,
+      );
+    const isMentorQuery =
+      /\b(?:mentor|mentors|speaker|expert|advisor|coach|help|guide|teach|learn|contact|connect|recommend)\b/i.test(
+        userPrompt,
+      );
 
     if (!isEventQuery && !isClubQuery && !isMentorQuery) {
       return `
@@ -32,7 +71,8 @@ MENTORS_DIRECTORY:
 `;
     }
 
-    let clubsStr = "(Clubs context omitted to optimize token usage. Suggest the user ask explicitly about \"clubs\" or community names.)";
+    let clubsStr =
+      '(Clubs context omitted to optimize token usage. Suggest the user ask explicitly about "clubs" or community names.)';
     if (isClubQuery) {
       const clubs = await getClubs(true);
       clubsStr = clubs
@@ -49,10 +89,12 @@ MENTORS_DIRECTORY:
         .join("\n");
     }
 
-    let eventsStr = "(Calendar events context omitted to optimize token usage. Suggest the user ask explicitly about \"events\" or \"calendar\".)";
+    let eventsStr =
+      '(Calendar events context omitted to optimize token usage. Suggest the user ask explicitly about "events" or "calendar".)';
     if (isEventQuery) {
       const monthsToFetch = new Set<string>();
-      const regex = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b[\s-]*(\d{2,4})?/gi;
+      const regex =
+        /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b[\s-]*(\d{2,4})?/gi;
       let m;
       while ((m = regex.exec(userPrompt))) {
         const monthName = m[1];
@@ -78,12 +120,75 @@ MENTORS_DIRECTORY:
 
       // Extract search keywords from user prompt (filter out stop words)
       const stopWords = new Set([
-        "what", "is", "about", "event", "events", "the", "there", "in", "on", "at", "for", "of",
-        "and", "to", "a", "an", "this", "that", "these", "those", "which", "who", "how", "why",
-        "where", "when", "details", "detail", "info", "information", "can", "you", "me", "show",
-        "list", "get", "any", "find", "search", "with", "from", "are", "here", "there", "is",
-        "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "but",
-        "by", "or", "as", "if", "then", "else", "so", "than", "too", "very", "s", "t",
+        "what",
+        "is",
+        "about",
+        "event",
+        "events",
+        "the",
+        "there",
+        "in",
+        "on",
+        "at",
+        "for",
+        "of",
+        "and",
+        "to",
+        "a",
+        "an",
+        "this",
+        "that",
+        "these",
+        "those",
+        "which",
+        "who",
+        "how",
+        "why",
+        "where",
+        "when",
+        "details",
+        "detail",
+        "info",
+        "information",
+        "can",
+        "you",
+        "me",
+        "show",
+        "list",
+        "get",
+        "any",
+        "find",
+        "search",
+        "with",
+        "from",
+        "are",
+        "here",
+        "there",
+        "is",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "but",
+        "by",
+        "or",
+        "as",
+        "if",
+        "then",
+        "else",
+        "so",
+        "than",
+        "too",
+        "very",
+        "s",
+        "t",
       ]);
 
       const words = userPrompt
@@ -152,15 +257,79 @@ MENTORS_DIRECTORY:
       }
     }
 
-    let mentorsStr = "Mentor Directory Context omitted to optimize token usage. Advise the user to ask explicitly about 'mentors' or search using keyword tags (e.g. 'Who is an expert in React?') to list active mentor records.";
+    let mentorsStr =
+      "Mentor Directory Context omitted to optimize token usage. Advise the user to ask explicitly about 'mentors' or search using keyword tags (e.g. 'Who is an expert in React?') to list active mentor records.";
     if (isMentorQuery) {
       const stopWords = new Set([
-        "what", "is", "about", "event", "events", "the", "there", "in", "on", "at", "for", "of",
-        "and", "to", "a", "an", "this", "that", "these", "those", "which", "who", "how", "why",
-        "where", "when", "details", "detail", "info", "information", "can", "you", "me", "show",
-        "list", "get", "any", "find", "search", "with", "from", "are", "here", "there", "is",
-        "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "but",
-        "by", "or", "as", "if", "then", "else", "so", "than", "too", "very", "s", "t",
+        "what",
+        "is",
+        "about",
+        "event",
+        "events",
+        "the",
+        "there",
+        "in",
+        "on",
+        "at",
+        "for",
+        "of",
+        "and",
+        "to",
+        "a",
+        "an",
+        "this",
+        "that",
+        "these",
+        "those",
+        "which",
+        "who",
+        "how",
+        "why",
+        "where",
+        "when",
+        "details",
+        "detail",
+        "info",
+        "information",
+        "can",
+        "you",
+        "me",
+        "show",
+        "list",
+        "get",
+        "any",
+        "find",
+        "search",
+        "with",
+        "from",
+        "are",
+        "here",
+        "there",
+        "is",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "but",
+        "by",
+        "or",
+        "as",
+        "if",
+        "then",
+        "else",
+        "so",
+        "than",
+        "too",
+        "very",
+        "s",
+        "t",
       ]);
 
       const words = userPrompt
@@ -183,19 +352,22 @@ MENTORS_DIRECTORY:
 
       const matchedMentors = Array.from(matchedMentorsMap.values()).slice(0, 5);
       if (matchedMentors.length > 0) {
-        mentorsStr = matchedMentors
-          .map(
-            (m) => `
+        mentorsStr =
+          matchedMentors
+            .map(
+              (m) => `
 - Mentor Name: ${wrapCDATA(m.name)} (ID: ${wrapCDATA(String(m.id))})
   Expertise: ${wrapCDATA(m.expertise)}
   Organization: ${wrapCDATA(m.organization)}
   LinkedIn: ${wrapCDATA(m.linkedin)}
   Description: ${wrapCDATA(m.description)}
 `,
-          )
-          .join("\n") + `\n... (Recommend the user search using "!mentors" or filter using keyword tags e.g. "!mentor -f React" to see full directory listings)`;
+            )
+            .join("\n") +
+          `\n... (Recommend the user search using "!mentors" or filter using keyword tags e.g. "!mentor -f React" to see full directory listings)`;
       } else {
-        mentorsStr = "No matching mentors found in directory matching your exact search terms.";
+        mentorsStr =
+          "No matching mentors found in directory matching your exact search terms.";
       }
     }
 
