@@ -56,7 +56,7 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
   try {
     const { rerankResults } = await import("./reranker");
 
-    const urlMatch = query.match(/https?:\\/\\/\\S+/i);
+    const urlMatch = query.match(/https?:\/\/\S+/i);
     let result: SearchResponse | null = null;
     
     if (urlMatch) {
