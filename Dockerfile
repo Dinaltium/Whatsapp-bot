@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libatk-bridge2.0-0 \
     libcups2 \
     libgbm1 \
-    libasound2t64 \
+    libasound2 \
     libpangocairo-1.0-0 \
     libxss1 \
     libgtk-3-0 \
