@@ -19,30 +19,10 @@ export interface Club {
   representatives: CommunityRep[];
 }
 
-// Global promise queue to serialize Puppeteer crawl executions
-let puppeteerQueue: Promise<any> = Promise.resolve();
-
-async function serializePuppeteer<T>(task: () => Promise<T>): Promise<T> {
-  const currentQueue = puppeteerQueue;
-  let resolveQueue: () => void;
-  const nextInQueue = new Promise<void>((resolve) => {
-    resolveQueue = resolve;
-  });
-  puppeteerQueue = nextInQueue;
-  try {
-    await currentQueue;
-  } catch (err) {
-    // Ignore errors from previous tasks in the queue to prevent deadlocking
-  }
-  try {
-    return await task();
-  } finally {
-    resolveQueue!();
-  }
-}
+import { serializePuppeteer } from "../../utils/puppeteerQueue";
 
 export async function scrapeClubsLive(): Promise<Club[]> {
-  return serializePuppeteer(async () => {
+  return serializePuppeteer("scrape-clubs", async () => {
     console.log("Launching Puppeteer to scrape communities...");
     const browser = await puppeteer.launch({
       headless: true,
