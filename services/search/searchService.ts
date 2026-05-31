@@ -56,22 +56,23 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
   try {
     const { rerankResults } = await import("./reranker");
 
-    if (preferFirecrawl(query)) {
-      const { searchWithFirecrawl, extractWithFirecrawl } = await import("./providers/firecrawl");
-      // Check if it's a URL for extraction
-      const urlMatch = query.match(/https?:\/\/\S+/i);
-      let result: SearchResponse | null = null;
-      if (urlMatch) {
-        result = await extractWithFirecrawl(urlMatch[0]);
-      } else {
-        result = await searchWithFirecrawl(query);
-      }
-      if (result) {
-        result.results = rerankResults(query, result.results);
-        return result;
-      }
-      // Fallback to Tavily
+    const { searchWithFirecrawl, extractWithFirecrawl } = await import("./providers/firecrawl");
+    // Check if it's a URL for extraction
+    const urlMatch = query.match(/https?:\/\/\S+/i);
+    let result: SearchResponse | null = null;
+    
+    if (urlMatch) {
+      result = await extractWithFirecrawl(urlMatch[0]);
+    } else {
+      result = await searchWithFirecrawl(query);
     }
+    
+    if (result && result.results && result.results.length > 0) {
+      result.results = rerankResults(query, result.results);
+      return result;
+    }
+    
+    console.info(`[SearchService] Firecrawl returned no results or failed, falling back to Tavily.`);
 
     const { searchWithTavily } = await import("./providers/tavily");
     const tavilyResult = await searchWithTavily(query);
