@@ -582,8 +582,8 @@ export async function handleMessage(
       };
     }
     const systemWithSearch = searchContext
-      ? `${SELF_SYSTEM_PROMPT}\n\nWeb search results:\n${searchContext}`
-      : SELF_SYSTEM_PROMPT;
+      ? `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nWeb search results:\n${searchContext}`
+      : `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
     const aiReply = await getGroqReply(
       [{ role: "user", content: query }],
       groqApiKey,
@@ -601,7 +601,7 @@ export async function handleMessage(
     };
   }
 
-  let systemPrompt = SELF_SYSTEM_PROMPT;
+  let systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
   let modelToUse = GROQ_MODEL_DEFAULT;
 
   if (requiresCurrentInfo(raw)) {
@@ -610,7 +610,7 @@ export async function handleMessage(
     
     if (searchContext) {
       console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
-      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nReal-time web search results:\n${searchContext}`;
+      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nReal-time web search results:\n${searchContext}`;
       modelToUse = GROQ_MODEL_SCOUT;
     } else {
       console.warn(`[SELF] Web search was triggered but returned no results.`);

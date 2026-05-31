@@ -56,28 +56,29 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
   try {
     const { rerankResults } = await import("./reranker");
 
-    const { searchWithFirecrawl, extractWithFirecrawl } = await import("./providers/firecrawl");
-    // Check if it's a URL for extraction
-    const urlMatch = query.match(/https?:\/\/\S+/i);
+    const urlMatch = query.match(/https?:\\/\\/\\S+/i);
     let result: SearchResponse | null = null;
     
     if (urlMatch) {
+      const { extractWithFirecrawl } = await import("./providers/firecrawl");
       result = await extractWithFirecrawl(urlMatch[0]);
-    } else {
+    } else if (preferFirecrawl(query)) {
+      const { searchWithFirecrawl } = await import("./providers/firecrawl");
       result = await searchWithFirecrawl(query);
+    } else {
+      const { searchWithTavily } = await import("./providers/tavily");
+      result = await searchWithTavily(query);
+      if (!result || !result.results || result.results.length === 0) {
+        console.info(`[SearchService] Tavily returned no results, falling back to Firecrawl.`);
+        const { searchWithFirecrawl } = await import("./providers/firecrawl");
+        result = await searchWithFirecrawl(query);
+      }
     }
     
     if (result && result.results && result.results.length > 0) {
       result.results = rerankResults(query, result.results);
       return result;
     }
-    
-    console.info(`[SearchService] Firecrawl returned no results or failed, falling back to Tavily.`);
-
-    const { searchWithTavily } = await import("./providers/tavily");
-    const tavilyResult = await searchWithTavily(query);
-    tavilyResult.results = rerankResults(query, tavilyResult.results);
-    return tavilyResult;
   } catch (err) {
     console.warn("[SearchService] searchWeb failed:", err);
     return empty;

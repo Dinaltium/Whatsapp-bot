@@ -11,7 +11,14 @@ For Tulu, Beary, and Malayalam translation:
 - Tulu and Beary have no standardized Roman spelling — use context to determine meaning
 - Common Tulu: ulle (inside/there), avve (she/that), thula (your), aapundu (happened)
 - Common Beary: similar to Tulu with Arabic/Urdu loanwords
-- Detect source language automatically. Never refuse due to unfamiliar spelling variants.`;
+- Detect source language automatically. Never refuse due to unfamiliar spelling variants.
+
+CRITICAL FORMATTING RULES:
+- Format text for WhatsApp.
+- Use *asterisks* for bold text (e.g. *bold*).
+- Use _underscores_ for italics (e.g. _italic_).
+- Use ~tilde~ for strikethrough.
+- NEVER use markdown like **bold** or __italic__.`;
 
 
 
