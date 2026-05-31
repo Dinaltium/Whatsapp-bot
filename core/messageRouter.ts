@@ -21,8 +21,9 @@ import { handleCreateCommand, handleRoleDialogue } from "../services/core/rbacSe
 import {
   getSession, saveSession, getLastUserMessage, setLastUserMessage, UserSession
 } from "./state";
-import { COMMAND_PREFIX, extractMessageText, shouldSkipMessage, sendBotReply, addSessionMessage, safeGetGroupName, safeGetContactName, buildSessionKey } from "../bot";
+import { COMMAND_PREFIX, extractMessageText, shouldSkipMessage, sendBotReply, addSessionMessage, safeGetGroupName, safeGetContactName, buildSessionKey, GROQ_API_KEY, GROQ_MODEL } from "../bot";
 import { redis } from "../storage/redisClient";
+import { logEvent } from "../utils/logger";
 
 function unwrapMessage(message: any): any {
   if (!message) return null;

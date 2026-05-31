@@ -1,7 +1,7 @@
 import { registerCommand } from "../commandRegistry";
-import { sendBotReply, extractMentionedJids } from "../../../bot";
-import { assignRoleToUser, resolveSenderId } from "../../../security/rbac";
-import { getSession, buildSessionKey } from "../../state";
+import { sendBotReply, extractMentionedJids, buildSessionKey } from "../../../bot";
+import { getSenderId } from "../../../security/rbac";
+import { getSession } from "../../state";
 
 registerCommand({
   name: "bulkrole",
@@ -26,11 +26,11 @@ registerCommand({
     }
 
     const results = [];
-    const { storeLidPhoneMapping } = await import("../../../storage/core/rbacRepository");
+    const { addManagedRole } = await import("../../../storage/core/rbacRepository");
 
     for (const jid of mentionedJids) {
       try {
-        const ok = await assignRoleToUser(jid, roleName);
+        const ok = await addManagedRole(jid, roleName);
         if (ok) {
           results.push(`✅ @${jid.split("@")[0]}`);
           try {
