@@ -1,13 +1,14 @@
 
-import { default as makeWASocket, proto, downloadMediaMessage } from "@whiskeysockets/baileys";
+import { default as makeWASocket, proto } from "@whiskeysockets/baileys";
 import WhatsAppAgent from "../agents/WhatsAppAgent";
-import DKBAgent from "../agents/DKBAgent";
+
 import groupConfig from "../config/groupAllowlist";
 import chatConfig from "../config/chatAllowlist";
-import { getJidHash, logStructured, logEvent } from "../utils/logger";
+import { getJidHash, logStructured } from "../utils/logger";
 import { normalizeJid, getSenderId, isAdminSender, isAdminAction } from "../security/rbac";
 import { resolveSenderId } from "./middleware/lidResolver";
 import { isHistoricalMessage, isDuplicateMessage } from "./middleware/antiReplay";
+import { handleIntroDetection } from "./middleware/introDetector";
 import {
   checkAiRateLimit,
   checkGroupAndGlobalLimits,
@@ -18,10 +19,9 @@ import {
 } from "../security/rateLimiter";
 import { handleCreateCommand, handleRoleDialogue } from "../services/core/rbacService";
 import {
-  getSession, saveSession, getLastUserMessage, setLastUserMessage, 
-  addPendingIntro, getPendingIntro, removePendingIntro, getAllPendingIntros, UserSession
+  getSession, saveSession, getLastUserMessage, setLastUserMessage, UserSession
 } from "./state";
-import { COMMAND_PREFIX, GROQ_API_KEY, GROQ_MODEL, extractMessageText, shouldSkipMessage, extractMentionedJids, sendBotReply, addSessionMessage, safeGetGroupName, safeGetContactName, buildSessionKey } from "../bot";
+import { COMMAND_PREFIX, extractMessageText, shouldSkipMessage, sendBotReply, addSessionMessage, safeGetGroupName, safeGetContactName, buildSessionKey } from "../bot";
 import { redis } from "../storage/redisClient";
 
 function unwrapMessage(message: any): any {
@@ -89,135 +89,12 @@ export async function handleMessageUpsert(
         await setLastUserMessage(`${from}:${senderId}`, text);
       }
 
-      // ── INTRO DETECTION ──────────────────────────────────────────────────
-      // Runs on ALL non-command messages in bot-2 groups.
-      // Phase 1 – Trigger: someone says "welcome/introduce" + @mentions a JID
-      //           → add that JID to pendingIntros.
-      // Phase 2 – Capture: sender is in pendingIntros
-      //           → classify via AI, auto-add if mentor, give chatConfig access.
-      if (
-        text &&
-        from.endsWith("@g.us") &&
-        !text.startsWith(COMMAND_PREFIX) &&
-        msg.message
-      ) {
-        const introGroupBot = groupConfig.getGroupBot(from);
-        if (introGroupBot?.botNumber === 2) {
-          const introSenderId = normalizeJid(senderId) || "";
-          const hasTriggerWord = /\bintroduce\b|\bwelcome\b/i.test(text);
-
-          // --- Phase 1: detect trigger and register JIDs to watch ---
-          if (hasTriggerWord) {
-            const mentionedJids = extractMentionedJids(msg);
-            for (const jid of mentionedJids) {
-              const normalized = normalizeJid(jid);
-              if (
-                normalized &&
-                !normalized.endsWith("@g.us") &&
-                normalized !== introSenderId
-              ) {
-                await addPendingIntro(normalized, from);
-                logStructured({
-                  event: "intro_tracker_watch",
-                  bot: 2,
-                  groupHash: getJidHash(from),
-                  targetHash: getJidHash(normalized),
-                });
-              }
-            }
-            // Fallback: extract phone numbers from text when no @mention
-            if (mentionedJids.length === 0) {
-              const phoneMatches =
-                text.match(/(?:\+?\d[\d\s\-]{7,14}\d)/g) || [];
-              for (const ph of phoneMatches) {
-                const digits = ph.replace(/\D/g, "");
-                if (digits.length >= 10) {
-                  const derivedJid = `${digits}@s.whatsapp.net`;
-                  await addPendingIntro(derivedJid, from);
-                  logStructured({
-                    event: "intro_tracker_watch_phone",
-                    bot: 2,
-                    groupHash: getJidHash(from),
-                    targetHash: getJidHash(derivedJid),
-                  });
-                }
-              }
-            }
-          }
-
-          // --- Phase 2: sender is tracked — this IS their intro message ---
-          let trackedGroupJid: string | null = null;
-
-          // Exact JID match
-          if ((await getPendingIntro(introSenderId)) !== null) {
-            trackedGroupJid = await getPendingIntro(introSenderId);
-            await removePendingIntro(introSenderId);
-          } else {
-            // Fuzzy: compare last 10 digits to handle country-code mismatches
-            const senderSuffix = introSenderId.replace(/\D/g, "").slice(-10);
-            const allIntros = await getAllPendingIntros();
-            for (const [trackedJid, groupJid] of Object.entries(allIntros)) {
-              const trackedSuffix = trackedJid.replace(/\D/g, "").slice(-10);
-              if (senderSuffix && senderSuffix === trackedSuffix) {
-                trackedGroupJid = groupJid;
-                await removePendingIntro(trackedJid);
-                break;
-              }
-            }
-          }
-
-          if (trackedGroupJid && trackedGroupJid === from && text.length > 20) {
-            logStructured({
-              event: "intro_captured",
-              bot: 2,
-              userHash: getJidHash(introSenderId),
-            });
-            try {
-              const senderPhone = introSenderId.replace(/@.*/, "");
-              const result = await DKBAgent.classifyAndAutoAddMentor(
-                text,
-                introSenderId,
-                senderPhone,
-                GROQ_API_KEY,
-                GROQ_MODEL,
-              );
-              
-              if (result.isMentor) {
-                logStructured({
-                  event: "intro_classified",
-                  result: "mentor",
-                  userHash: getJidHash(introSenderId),
-                });
-                await chatConfig.addChat(introSenderId, 2);
-              } else {
-                logStructured({
-                  event: "intro_classified",
-                  result: "student",
-                  userHash: getJidHash(introSenderId),
-                });
-              }
-
-              // Send the welcome message if we received one, else use a fallback
-              let welcomeText = result.welcomeMessage;
-              if (!welcomeText) {
-                const displayName = result.mentorName || "there";
-                if (result.isMentor) {
-                  welcomeText = `Hi ${displayName}, welcome to DK24! Glad to have you with us as a mentor. We look forward to your active presence in our developer community!`;
-                } else {
-                  welcomeText = `Hi ${displayName}, welcome to DK24! Glad to have you join us as a student. We hope you connect, learn, and grow with the community!`;
-                }
-              }
-
-              await sendBotReply(sock, from, welcomeText);
-              
-            } catch (err) {
-              console.error("[DEBUG] Intro classification error:", err);
-            }
-            continue; // Intro handled — skip command processing for this message
-          }
+      // ── INTRO DETECTION (DKB groups only) ──
+      if (text && from.endsWith("@g.us") && msg.message) {
+        if (await handleIntroDetection(sock, msg, from, senderId, text)) {
+          continue;
         }
       }
-      // ── END INTRO DETECTION ──────────────────────────────────────────────
 
       // ── MAJESTIC REVEAL INTERCEPTOR (NO PREFIX REQUIRED) ──
       const trimmedText = (text || "").trim().toLowerCase();
