@@ -43,6 +43,15 @@ export const CURRENT_INFO_PATTERNS = [
   /\b2027\b/i,
 ];
 
+// Patterns that require absolute latest live data
+export const RECENCY_SENSITIVE_PATTERNS = [
+  /\blatest\b/i,
+  /\bcurrent\b/i,
+  /\bnewest\b/i,
+  /\bjust released\b/i,
+  /\bthis week\b/i,
+];
+
 export function requiresCurrentInfo(prompt: string): boolean {
   return CURRENT_INFO_PATTERNS.some((p) => p.test(prompt));
 }
@@ -59,15 +68,26 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
     const urlMatch = query.match(/https?:\/\/\S+/i);
     let result: SearchResponse | null = null;
     
+    const needsLiveData = RECENCY_SENSITIVE_PATTERNS.some((p) => p.test(query));
+
     if (urlMatch) {
       const { extractWithFirecrawl } = await import("./providers/firecrawl");
       result = await extractWithFirecrawl(urlMatch[0]);
-    } else if (preferFirecrawl(query)) {
+    } else if (preferFirecrawl(query) || needsLiveData) {
+      console.info(`[SearchService] Query requires live/extracted data, using Firecrawl primarily.`);
       const { searchWithFirecrawl } = await import("./providers/firecrawl");
       result = await searchWithFirecrawl(query);
+      
+      if (!result || !result.results || result.results.length === 0) {
+        console.info(`[SearchService] Firecrawl returned no results, falling back to Tavily.`);
+        const { searchWithTavily } = await import("./providers/tavily");
+        result = await searchWithTavily(query);
+      }
     } else {
+      console.info(`[SearchService] Using Tavily for general knowledge search.`);
       const { searchWithTavily } = await import("./providers/tavily");
       result = await searchWithTavily(query);
+      
       if (!result || !result.results || result.results.length === 0) {
         console.info(`[SearchService] Tavily returned no results, falling back to Firecrawl.`);
         const { searchWithFirecrawl } = await import("./providers/firecrawl");

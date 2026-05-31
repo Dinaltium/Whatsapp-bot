@@ -573,17 +573,20 @@ export async function handleMessage(
     console.info(`[SELF] Executing explicit web search for query: "${query}"`);
     const searchContext = await searchWeb(query);
     
-    if (!groqApiKey) {
+    if (!searchContext) {
       return {
-        reply: searchContext
-          ? `${searchContext}`
-          : `No results found for "${query}".`,
+        reply: `Web search failed or no results found for "${query}". Ensure search API keys (TAVILY_API_KEY or FIRECRAWL_API_KEY) are configured in the environment.`,
         usedAI: false,
       };
     }
-    const systemWithSearch = searchContext
-      ? `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nWeb search results:\n${searchContext}`
-      : `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
+
+    if (!groqApiKey) {
+      return {
+        reply: `${searchContext}`,
+        usedAI: false,
+      };
+    }
+    const systemWithSearch = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nWeb search results:\n${searchContext}`;
     const aiReply = await getGroqReply(
       [{ role: "user", content: query }],
       groqApiKey,
@@ -614,6 +617,7 @@ export async function handleMessage(
       modelToUse = GROQ_MODEL_SCOUT;
     } else {
       console.warn(`[SELF] Web search was triggered but returned no results.`);
+      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n[SYSTEM WARNING: A web search was attempted for this query but failed. Please inform the user that you cannot access the live web right now and your knowledge may be outdated.]`;
     }
   } else {
     console.debug(`[SELF] No current info pattern detected. Proceeding with standard generation.`);
