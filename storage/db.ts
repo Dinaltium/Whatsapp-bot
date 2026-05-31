@@ -21,7 +21,10 @@ export function getPool(): Pool | null {
       connectionTimeoutMillis: Number(
         process.env.DB_CONNECT_TIMEOUT_MS || 10000,
       ),
-      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 10000),
+      idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS || 30000),
+      max: Number(process.env.DB_POOL_MAX || 10),
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
       ssl:
         process.env.DATABASE_SSL === "false"
           ? false
@@ -30,6 +33,10 @@ export function getPool(): Pool | null {
 
     dbPool.on("error", (err) => {
       console.warn("⚠️ dbPool error:", err.message);
+    });
+
+    dbPool.on("connect", (client) => {
+      client.query("SET statement_timeout = '30s'").catch(() => {});
     });
 
     return dbPool;
