@@ -1,3 +1,22 @@
+export class GroqRateLimitError extends Error {
+  constructor() {
+    super("Groq API rate limited (429)");
+    this.name = "GroqRateLimitError";
+  }
+}
+export class GroqServerError extends Error {
+  constructor(status: number) {
+    super(`Groq server error (${status})`);
+    this.name = "GroqServerError";
+  }
+}
+export class GroqKeyMissingError extends Error {
+  constructor() {
+    super("Groq API key missing");
+    this.name = "GroqKeyMissingError";
+  }
+}
+
 import Groq from "groq-sdk";
 
 export interface ConversationMessage {
@@ -17,7 +36,7 @@ export async function getGroqReply(
   systemPrompt: string,
 ): Promise<string> {
   if (!groqApiKey) {
-    return "Groq key missing. Set GROQ_API_KEY in your environment to enable AI replies.";
+    throw new GroqKeyMissingError();
   }
 
   const client = new Groq({
@@ -66,6 +85,8 @@ export async function getGroqReply(
       );
 
       if (!res.ok) {
+        if (res.status === 429) throw new GroqRateLimitError();
+        if (res.status >= 500) throw new GroqServerError(res.status);
         const errorBody = await res.text();
         throw new Error(`Groq API ${res.status}: ${errorBody}`);
       }
