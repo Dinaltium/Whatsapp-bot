@@ -79,6 +79,7 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
       result.results = rerankResults(query, result.results);
       return result;
     }
+    return empty;
   } catch (err) {
     console.warn("[SearchService] searchWeb failed:", err);
     return empty;
