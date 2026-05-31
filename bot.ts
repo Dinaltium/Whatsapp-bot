@@ -17,6 +17,7 @@ import { calculateTypingDelay } from "./utils/typingDelay";
 import { startHealthServer } from "./infrastructure/health/healthServer";
 import { registerContactSyncHandlers } from "./infrastructure/whatsapp/contactSync";
 import { registerLidMapperHandlers } from "./infrastructure/whatsapp/lidMapper";
+import { startReminderScheduler } from "./infrastructure/scheduler/reminderScheduler";
 
 export const COMMAND_PREFIX = "!";
 export const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -430,6 +431,7 @@ let persistentAuthStore: any = null;
 async function startBot(): Promise<void> {
   printBanner();
   startHealthServer();
+  startReminderScheduler();
 
   try {
     const { redis } = await import("./storage/redisClient");

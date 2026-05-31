@@ -206,6 +206,16 @@ export async function ensureSchema(): Promise<void> {
         logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS wa_reminders (
+        id SERIAL PRIMARY KEY,
+        jid TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        remind_at TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       INSERT INTO rbac_roles (name, description)
       VALUES ('mentor', 'Can manage mentor intake and mentor directory records')
       ON CONFLICT (name) DO NOTHING;

@@ -5,3 +5,4 @@
 import "./allowlistController";
 import "./rbacController";
 import "./utilityController";
+import "./reminderController";
