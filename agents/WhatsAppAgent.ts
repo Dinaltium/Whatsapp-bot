@@ -1,130 +1,47 @@
+import { BotHandler, BotContext, AgentResult } from "./core/BotHandler";
 import ParagAgent from "./ParagAgent";
 import EmbedclubAgent from "./EmbedclubAgent";
 import DKBAgent from "./DKBAgent";
 
-interface ConversationMessage {
-  role: "user" | "assistant";
-  content: string;
+// SELF bot is NOT in this registry — it is handled separately in messageRouter.ts
+const BOTS_REGISTRY: BotHandler[] = [ParagAgent, EmbedclubAgent, DKBAgent];
+
+export function getBotRegistry(): BotHandler[] {
+  return BOTS_REGISTRY;
 }
 
-interface UserSession {
-  domainUnlocked: boolean;
-  lastActiveAt: number;
-  messages: ConversationMessage[];
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
-  pendingMentor?: {
-    name: string;
-    organization: string;
-    description?: string;
-    expertise?: string;
-    linkedin?: string;
-    instagram?: string;
-    github?: string;
-    email?: string;
-    phoneNoCountryCode: string;
-  };
-  pendingEdit?: {
-    mentorId: number;
-    flag: string;
-    phoneNoCountryCode: string;
-  };
-}
-
-interface AgentResult {
-  reply: string;
-  usedAI: boolean;
-  domainLocked?: boolean;
-}
-
-interface BotConfig {
-  id: number;
-  name: string;
-  description: string;
-  handler: (
-    session: UserSession,
-    userPrompt: string,
-    groqApiKey: string | undefined,
-    groqModel: string,
-    isAdmin: boolean,
-    senderJid?: string,
-  ) => Promise<AgentResult>;
-}
-
-// Centrally managed registry of deployable bots
-const BOTS_REGISTRY: BotConfig[] = [
-  {
-    id: 0,
-    name: "PARAG",
-    description: "Concise assistant for technology and hackathon support",
-    handler: (session, userPrompt, groqApiKey, groqModel, isAdmin) =>
-      ParagAgent.handleMessage(session, userPrompt, groqApiKey, groqModel, isAdmin),
-  },
-  {
-    id: 1,
-    name: "ECB",
-    description: "Hardware and embedded systems community assistant",
-    handler: (session, userPrompt, _groqApiKey, _groqModel, _isAdmin) =>
-      EmbedclubAgent.handleMessage(session, userPrompt),
-  },
-  {
-    id: 2,
-    name: "DKB",
-    description: "DK24 (Developer Kommunity 24) assistant for collaborative coding and events",
-    handler: (session, userPrompt, groqApiKey, groqModel, isAdmin, senderJid) =>
-      DKBAgent.handleMessage(session, userPrompt, groqApiKey, groqModel, isAdmin, senderJid),
-  },
-];
-
-/**
- * Centrally routes and handles messages for registered bots.
- * Acts as the deployer and administrative firewall: catches errors and returns
- * generic safety/unavailability messages rather than breaking the client connection.
- */
-async function handleAgentMessage(
-  session: UserSession,
-  userPrompt: string,
-  groqApiKey: string | undefined,
-  groqModel: string,
+export async function handleAgentMessage(
+  ctx: BotContext,
   botNumber: number = 0,
-  isAdmin: boolean = false,
-  senderJid?: string,
 ): Promise<AgentResult> {
-  const bot = BOTS_REGISTRY.find((b) => b.id === botNumber);
+  const bot = BOTS_REGISTRY.find((b) => b.botId === botNumber);
 
   if (!bot) {
-    console.warn(`⚠️ Configuration mismatch: Bot ID ${botNumber} was requested but is not registered.`);
+    console.warn(`[WhatsAppAgent] Bot ID ${botNumber} not found in registry.`);
     return {
-      reply: `Error: Bot ${botNumber} is not configured or is currently not available.`,
+      reply: `Error: Bot ${botNumber} is not configured or currently unavailable.`,
       usedAI: false,
     };
   }
 
   try {
-    // Coordinate execution through the secure boundary
-    return await bot.handler(session, userPrompt, groqApiKey, groqModel, isAdmin, senderJid);
+    return await bot.handleMessage(ctx);
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`🚨 Administration Panel - Bot '${bot.name}' failed to execute:`, errorMessage);
-
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[WhatsAppAgent] Bot '${bot.name}' failed:`, msg);
     return {
-      reply: `The bot ${bot.name} is temporarily not available. Please try again in a moment.`,
+      reply: `The bot ${bot.name} is temporarily unavailable. Please try again.`,
       usedAI: false,
     };
   }
 }
 
-/**
- * Returns a list of active bots for admin inspection
- */
-function getActiveBots(): Omit<BotConfig, "handler">[] {
-  return BOTS_REGISTRY.map((b) => ({
-    id: b.id,
-    name: b.name,
-    description: b.description,
-  }));
+export function getActiveBots(): { id: number; name: string }[] {
+  return BOTS_REGISTRY.map((b) => ({ id: b.botId, name: b.name }));
 }
 
 export default {
   handleAgentMessage,
   getActiveBots,
+  getBotRegistry,
 };
