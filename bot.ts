@@ -8,6 +8,13 @@ import http from "http";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
+import ffmpegPath from "ffmpeg-static";
+import path from "path";
+
+if (ffmpegPath) {
+  process.env.PATH = `${path.dirname(ffmpegPath)}${path.delimiter}${process.env.PATH}`;
+}
+
 import groupConfig from "./config/groupAllowlist";
 import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
