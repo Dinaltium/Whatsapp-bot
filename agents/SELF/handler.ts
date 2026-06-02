@@ -523,7 +523,7 @@ export async function handleMessage(
     try {
       await sock.sendMessage(from, {
         audio: result.audioBuffer,
-        mimetype: "audio/mpeg",
+        mimetype: "audio/wav",
         ptt: true,
       });
     } catch (err) {

@@ -44,7 +44,8 @@ export async function generateVoiceMessage(
       body: JSON.stringify({
         model: "canopylabs/orpheus-arabic-saudi",
         input: text,
-        response_format: "mp3",
+        response_format: "wav",
+        voice: "sultan",
       }),
     });
 
