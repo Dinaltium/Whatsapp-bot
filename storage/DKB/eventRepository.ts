@@ -1,5 +1,4 @@
 import { getPool } from "../db";
-import puppeteer from "puppeteer";
 import { isCacheValid, markCacheUpdated } from "../core/cacheRepository";
 
 export interface Event {
@@ -20,8 +19,6 @@ export interface Event {
   stage?: string;
   month_year: string;
 }
-
-import { serializePuppeteer } from "../../utils/puppeteerQueue";
 
 // Date normalization helper (e.g. may26, may-2026, May 26 -> may-2026)
 export function normalizeMonthYear(input: string): string {
@@ -80,229 +77,78 @@ export function normalizeMonthYear(input: string): string {
 }
 
 export async function scrapeEventsLive(monthYear: string): Promise<Event[]> {
-  return serializePuppeteer(`scrape-events-${monthYear}`, async () => {
-    console.log(
-      `🕷️ Launching Puppeteer to scrape calendar events for [${monthYear}]...`,
-    );
-    const browser = await puppeteer.launch({
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const baseUrl = process.env.DK24_API_BASE_URL || "https://dk24.org";
+  const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+  const url = `${cleanBaseUrl}/api/v1/calendar?date=${monthYear}`;
+  console.log(`📡 Fetching calendar events from API: ${url}`);
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`API responded with status: ${res.status}`);
+    }
+    const data = (await res.json()) as { events: any[] };
+    const now = new Date();
+
+    const mappedEvents: Event[] = data.events.map((e) => {
+      const startDate = new Date(e.startDateTime);
+      const endDate = new Date(e.endDateTime);
+      
+      let stage = "Upcoming";
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        if (now > endDate) {
+          stage = "Completed / Concluded";
+        } else if (now >= startDate && now <= endDate) {
+          stage = "Active / Ongoing";
+        }
+      }
+
+      // Format date string to match expected text format (e.g., Start: Jun 15, 2026 16:00 | End: Jun 16, 2026 17:00)
+      const formatDateStr = (date: Date) => {
+        if (isNaN(date.getTime())) return "";
+        const formattedDate = date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric"
+        });
+        const formattedTime = date.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        });
+        return `${formattedDate} ${formattedTime}`;
+      };
+
+      const startStr = formatDateStr(startDate);
+      const endStr = formatDateStr(endDate);
+      const formattedDate = `Start: ${startStr} | End: ${endStr}`;
+
+      return {
+        id: e.id,
+        title: e.title,
+        host: e.organizationName || "",
+        date: formattedDate,
+        location: e.location || undefined,
+        description: e.description || undefined,
+        registration_deadline: undefined,
+        prize_pool: undefined,
+        tracks: undefined,
+        registration_link: e.registrationLink || undefined,
+        join_link: e.joinLink || undefined,
+        youtube_link: e.youtubeLink || undefined,
+        poster_url: e.posterUrl || undefined,
+        tags: e.tags || undefined,
+        stage,
+        month_year: monthYear,
+      };
     });
 
-    try {
-      const page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      );
-      await page.setViewport({ width: 1280, height: 1000 });
-      // Request interception disabled for maximum page loading stability
-
-      page.setDefaultNavigationTimeout(60000);
-
-      const url = `https://dk24.org/calendar?date=${monthYear}`;
-      console.log(`Navigating to calendar: ${url}`);
-      const response = await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-    
-      console.log(`Response Status: ${response?.status() || "unknown"}`);
-      console.log(`Page Title: ${await page.title()}`);
-
-      // Wait for React rendering / skeleton elements to load dynamically
-      try {
-        await page.waitForFunction(
-          () => !document.querySelector(".animate-pulse"),
-          { timeout: 8000 }
-        );
-        console.log("Skeleton loading cleared.");
-      } catch (e) {
-        console.log("Timing out waiting for skeleton to clear, using fallback delay...");
-        await new Promise((resolve) => setTimeout(resolve, 4000));
-      }
-
-      // Find all buttons on the page that contain an h3 (representing event cards)
-      const buttons = await page.$$("button");
-      const eventButtonsIndex: number[] = [];
-      for (let i = 0; i < buttons.length; i++) {
-        const hasH3 = await buttons[i].$("h3");
-        if (hasH3) {
-          eventButtonsIndex.push(i);
-        }
-      }
-
-      console.log(
-        `Found ${eventButtonsIndex.length} event card buttons to scrape.`,
-      );
-
-      if (eventButtonsIndex.length === 0) {
-        const htmlSnippet = (await page.content()).substring(0, 800);
-        console.warn(
-          `Found 0 calendar event buttons in scrapeEventsLive. Page status: ${response?.status() || "unknown"}, title: "${await page.title()}". Snapshot: \n${htmlSnippet}`
-        );
-      }
-
-      const scrapedEvents: Event[] = [];
-
-      for (let i = 0; i < eventButtonsIndex.length; i++) {
-        const freshButtons = await page.$$("button");
-        const idx = eventButtonsIndex[i];
-        if (freshButtons[idx]) {
-          console.log(
-            `Scraping event detail modal ${i + 1}/${eventButtonsIndex.length}...`,
-          );
-          await freshButtons[idx].click();
-
-          // Wait for modal dialog transitions
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-
-          const details = await page.evaluate(() => {
-            const dialog = document.querySelector('[role="dialog"]');
-            if (!dialog) return null;
-
-            const titleEl =
-              dialog.querySelector("h2") || dialog.querySelector('[id*="title"]');
-            const title = titleEl ? titleEl.textContent?.trim() : "";
-
-            const hostEl = dialog.querySelector(".text-lg.text-muted-foreground");
-            const hostText = hostEl ? hostEl.textContent?.trim() : "";
-
-            const badges = Array.from(
-              dialog.querySelectorAll(".flex.flex-wrap.gap-2 span"),
-            );
-            const tags = badges.map((b) => b.textContent?.trim()).filter(Boolean);
-
-            const detailsContainer = dialog.querySelector(
-              ".grid.grid-cols-2.gap-6",
-            );
-            const dates: any[] = [];
-            if (detailsContainer) {
-              const blocks = Array.from(detailsContainer.children);
-              blocks.forEach((block) => {
-                const label =
-                  block.querySelector(".text-sm")?.textContent?.trim() || "";
-                const value =
-                  block.querySelector(".font-semibold")?.textContent?.trim() ||
-                  "";
-                const subValue =
-                  block.querySelector(".text-md")?.textContent?.trim() || "";
-                dates.push({ label, value, subValue });
-              });
-            }
-
-            const locHeader = Array.from(dialog.querySelectorAll("span")).find(
-              (s) => s.textContent?.includes("Location"),
-            );
-            const location = locHeader
-              ? locHeader.parentElement?.nextElementSibling?.textContent?.trim()
-              : "";
-
-            const aboutHeader = Array.from(dialog.querySelectorAll("h4")).find(
-              (h) => h.textContent?.includes("About Event"),
-            );
-            const description = aboutHeader
-              ? aboutHeader.nextElementSibling?.textContent?.trim()
-              : "";
-
-            const footer =
-              dialog.querySelector("footer") ||
-              dialog.querySelector('[class*="Footer"]');
-            const links: Record<string, string> = {};
-            if (footer) {
-              const anchors = Array.from(footer.querySelectorAll("a"));
-              anchors.forEach((a) => {
-                const href = a.getAttribute("href") || "";
-                const text = a.textContent?.trim() || "";
-                if (text.includes("Register")) links.registrationLink = href;
-                else if (text.includes("Website")) links.joinLink = href;
-                else if (text.includes("Recording")) links.youtubeLink = href;
-              });
-            }
-
-            return {
-              title,
-              hostText,
-              tags,
-              dates,
-              location,
-              description,
-              links,
-            };
-          });
-
-          if (details && details.title) {
-            // Combine extracted dates into a single date string
-            let formattedDate = "";
-            if (details.dates && details.dates.length > 0) {
-              formattedDate = details.dates
-                .map((d: any) => `${d.label}: ${d.value} ${d.subValue}`)
-                .join(" | ");
-            }
-
-            // Determine stage status
-            let stage = "Upcoming";
-            const now = new Date();
-            const startVal = details.dates?.find((d: any) => d.label === "Start");
-            const endVal = details.dates?.find((d: any) => d.label === "End");
-            if (startVal && endVal) {
-              const startDate = new Date(
-                `${startVal.value} ${startVal.subValue}`,
-              );
-              const endDate = new Date(`${endVal.value} ${endVal.subValue}`);
-              if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-                if (now > endDate) {
-                  stage = "Completed / Concluded";
-                } else if (now >= startDate && now <= endDate) {
-                  stage = "Active / Ongoing";
-                }
-              }
-            }
-
-            // Clean host text
-            const host = details.hostText
-              ? details.hostText.replace(/^Hosted by\s+/i, "")
-              : "";
-
-            const id = `evt-${details.title.toLowerCase().replace(/[^a-z0-9]/g, "-")}-${monthYear}`;
-
-            scrapedEvents.push({
-              id,
-              title: details.title,
-              host,
-              date: formattedDate || undefined,
-              location: details.location || undefined,
-              description: details.description || undefined,
-              registration_deadline: undefined,
-              prize_pool: undefined,
-              tracks: undefined,
-              registration_link: details.links?.registrationLink || undefined,
-              join_link: details.links?.joinLink || undefined,
-              youtube_link: details.links?.youtubeLink || undefined,
-              poster_url: undefined,
-              tags: details.tags || undefined,
-              stage,
-              month_year: monthYear,
-            });
-          }
-
-          // Close modal cleanly via Escape key
-          await page.keyboard.press("Escape");
-          await new Promise((resolve) => setTimeout(resolve, 800));
-        }
-      }
-
-      console.log(
-        `Successfully scraped ${scrapedEvents.length} events for ${monthYear}.`,
-      );
-      return scrapedEvents;
-    } catch (error) {
-      console.error(
-        `Puppeteer error scraping calendar events for ${monthYear}:`,
-        error,
-      );
-      throw error;
-    } finally {
-      await browser.close();
-    }
-  });
+    console.log(`Successfully fetched and mapped ${mappedEvents.length} events from API.`);
+    return mappedEvents;
+  } catch (error: any) {
+    console.error(`Error fetching calendar events from API for ${monthYear}:`, error.message);
+    throw error;
+  }
 }
 
 const inFlightEventsScrapes = new Map<string, Promise<Event[]>>();

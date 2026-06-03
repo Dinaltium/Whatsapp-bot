@@ -1,5 +1,4 @@
 import { getPool } from "../db";
-import puppeteer from "puppeteer";
 import { isCacheValid, markCacheUpdated } from "../core/cacheRepository";
 
 export interface CommunityRep {
@@ -19,193 +18,53 @@ export interface Club {
   representatives: CommunityRep[];
 }
 
-import { serializePuppeteer } from "../../utils/puppeteerQueue";
-
 export async function scrapeClubsLive(): Promise<Club[]> {
-  return serializePuppeteer("scrape-clubs", async () => {
-    console.log("Launching Puppeteer to scrape communities...");
-    const browser = await puppeteer.launch({
-      headless: true,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const baseUrl = process.env.DK24_API_BASE_URL || "https://dk24.org";
+  const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+  const url = `${cleanBaseUrl}/api/v1/communities`;
+  console.log(`📡 Fetching communities from API: ${url}`);
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`API responded with status: ${res.status}`);
+    }
+    const data = (await res.json()) as { communities: any[] };
+
+    const mappedClubs: Club[] = data.communities.map((c) => {
+      const name = c.name || "";
+      const id = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      return {
+        id,
+        name,
+        college: c.college || "",
+        description: c.description || "",
+        website: c.website || undefined,
+        logo: c.logo || undefined,
+        pocs: (c.pocs || []).map((p: any) => ({
+          name: p.name || "",
+          role: p.role || "",
+          email: p.email || undefined,
+        })),
+        representatives: (c.representatives || []).map((r: any) => ({
+          name: r.name || "",
+          role: r.role || "",
+          email: r.email || undefined,
+        })),
+      };
     });
 
-    try {
-      const page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      );
-      await page.setViewport({ width: 1280, height: 1000 });
-      // Request interception disabled for maximum page loading stability
-
-      page.setDefaultNavigationTimeout(60000);
-      
-      console.log("Navigating to communities...");
-      const response = await page.goto("https://dk24.org/communities", {
-        waitUntil: "networkidle2",
-        timeout: 60000,
-      });
-    
-      console.log(`Response Status: ${response?.status() || "unknown"}`);
-      console.log(`Page Title: ${await page.title()}`);
-
-      // Give it a dynamic delay to ensure loading skeleton clears
-      try {
-        await page.waitForFunction(
-          () => !document.querySelector(".animate-pulse"),
-          { timeout: 8000 }
-        );
-        console.log("Skeleton loading cleared.");
-      } catch (e) {
-        console.log("Timing out waiting for skeleton to clear, using fallback delay...");
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      }
-
-      const clubs = await page.evaluate(() => {
-        const cards: any[] = [];
-        const allCards = Array.from(
-          document.querySelectorAll("div.rounded-xl, div.border"),
-        );
-        for (const card of allCards) {
-          const nameEl = card.querySelector("h3");
-          if (
-            nameEl &&
-            card.textContent?.includes("POCs") &&
-            card.textContent?.includes("Representatives")
-          ) {
-            const name = nameEl.textContent?.trim() || "";
-            const collegeEl =
-              card.querySelector("p.text-muted-foreground") ||
-              card.querySelector("p");
-            const college = collegeEl ? collegeEl.textContent?.trim() || "" : "";
-
-            // Parse Description
-            let description = "";
-            const h4s = Array.from(card.querySelectorAll("h4"));
-            const descH4 = h4s.find(
-              (h) => h.textContent?.trim() === "Description",
-            );
-            if (descH4 && descH4.nextElementSibling) {
-              description = descH4.nextElementSibling.textContent?.trim() || "";
-            }
-
-            // Parse POCs
-            const pocs: any[] = [];
-            const pocsH4 = h4s.find((h) => h.textContent?.trim() === "POCs");
-            if (pocsH4 && pocsH4.nextElementSibling) {
-              const lis = Array.from(
-                pocsH4.nextElementSibling.querySelectorAll("li"),
-              );
-              for (const li of lis) {
-                const nameText =
-                  li.querySelector("span.font-medium")?.textContent?.trim() || "";
-                const emailDiv = li.querySelector(".text-xs");
-                const email = emailDiv ? emailDiv.textContent?.trim() || "" : "";
-
-                // Clone the element and remove name/email to isolate the role
-                const clone = li.cloneNode(true) as HTMLElement;
-                const nameEl = clone.querySelector("span.font-medium");
-                if (nameEl) nameEl.remove();
-                const emailEl = clone.querySelector(".text-xs");
-                if (emailEl) emailEl.remove();
-                let role = clone.textContent?.trim() || "";
-                role = role
-                  .replace(/^[-\s]+/, "")
-                  .replace(/[-\s]+$/, "")
-                  .trim();
-
-                if (nameText) pocs.push({ name: nameText, role, email });
-              }
-            }
-
-            // Parse Representatives
-            const reps: any[] = [];
-            const repsH4 = h4s.find(
-              (h) => h.textContent?.trim() === "Representatives",
-            );
-            if (repsH4 && repsH4.nextElementSibling) {
-              const lis = Array.from(
-                repsH4.nextElementSibling.querySelectorAll("li"),
-              );
-              for (const li of lis) {
-                const nameText =
-                  li.querySelector("span.font-medium")?.textContent?.trim() || "";
-                const emailDiv = li.querySelector(".text-xs");
-                const email = emailDiv ? emailDiv.textContent?.trim() || "" : "";
-
-                // Clone the element and remove name/email to isolate the role
-                const clone = li.cloneNode(true) as HTMLElement;
-                const nameEl = clone.querySelector("span.font-medium");
-                if (nameEl) nameEl.remove();
-                const emailEl = clone.querySelector(".text-xs");
-                if (emailEl) emailEl.remove();
-                let role = clone.textContent?.trim() || "";
-                role = role
-                  .replace(/^[-\s]+/, "")
-                  .replace(/[-\s]+$/, "")
-                  .trim();
-
-                if (nameText) reps.push({ name: nameText, role, email });
-              }
-            }
-
-            // Parse Website
-            let website = "";
-            const webH4 = h4s.find((h) => h.textContent?.trim() === "Website");
-            if (webH4) {
-              const sibling = webH4.nextElementSibling;
-              if (sibling) {
-                const a = (sibling.tagName && sibling.tagName.toLowerCase() === "a")
-                  ? sibling
-                  : sibling.querySelector("a");
-                if (a) {
-                  const href = a.getAttribute("href") || "";
-                  if (href.startsWith("http")) {
-                    website = href;
-                  }
-                }
-              }
-            }
-
-            const id = name
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, "-")
-              .replace(/-+/g, "-")
-              .replace(/^-|-$/g, "");
-
-            cards.push({
-              id,
-              name,
-              college,
-              description,
-              pocs,
-              representatives: reps,
-              website,
-            });
-          }
-        }
-        return cards;
-      });
-
-      console.log(
-        `🕷️ Successfully scraped ${clubs.length} communities from website.`,
-      );
-
-      if (clubs.length === 0) {
-        const htmlSnippet = (await page.content()).substring(0, 800);
-        console.warn(
-          `⚠️ Found 0 communities in scrapeClubsLive. Page status: ${response?.status() || "unknown"}, title: "${await page.title()}". Snapshot: \n${htmlSnippet}`
-        );
-      }
-
-      return clubs;
-    } catch (error) {
-      console.error("❌ Puppeteer error scraping clubs:", error);
-      throw error;
-    } finally {
-      await browser.close();
-    }
-  });
+    console.log(`Successfully fetched and mapped ${mappedClubs.length} communities from API.`);
+    return mappedClubs;
+  } catch (error: any) {
+    console.error("Error fetching communities from API:", error.message);
+    throw error;
+  }
 }
 
 // In-flight promise caches to collapse multiple parallel crawls
