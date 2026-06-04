@@ -1,6 +1,5 @@
 import { getGroqReply } from "../../ai/groqClient";
 import {
-  BOT_ASCII_BANNER,
   TECH_KEYWORDS,
   IRRELEVANT_WORDS,
   PARAG_SYSTEM_PROMPT,
@@ -25,11 +24,7 @@ interface AgentResult {
 }
 
 function formatBotReply(text: string): string {
-  const cleanedText = String(text || "").trim();
-  if (!cleanedText) {
-    return BOT_ASCII_BANNER;
-  }
-  return `${BOT_ASCII_BANNER}\n\n${cleanedText}`;
+  return String(text || "").trim();
 }
 
 function isTechOrHackathonQuery(query: string | null | undefined): boolean {
