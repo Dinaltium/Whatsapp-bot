@@ -36,6 +36,7 @@ export function getSenderId(msg: proto.IWebMessageInfo): string {
 
 export function isAdminSender(msg: proto.IWebMessageInfo, resolvedSenderId?: string): boolean {
   if (!msg) return false;
+  if (msg.key?.fromMe) return true;
   const adminEnv = process.env.ADMIN_JIDS || "";
   const admins = adminEnv
     .split(",")

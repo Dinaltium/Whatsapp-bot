@@ -514,6 +514,7 @@ export async function handleMessage(
 
     const result = await generateVoiceMessage(textToSpeak, groqApiKey);
     if (!result.success || !result.audioBuffer) {
+      console.error("[SELF] Voice generation failed:", result.error);
       return {
         reply: `Voice generation failed. Groq TTS may be temporarily unavailable.`,
         usedAI: false,

@@ -80,6 +80,20 @@ export async function handleMessageUpsert(
 
     if (!from) continue;
 
+    // ── LOOP/ECHO PREVENTION (check if sent by bot process) ──
+    const msgId = msg.key?.id;
+    let isSentByBot = false;
+    if (msgId && msg.key?.fromMe) {
+      try {
+        isSentByBot = (await redis.exists(`bot_sent_msg:${msgId}`)) === 1;
+      } catch {
+        /* fail safe */
+      }
+    }
+    if (isSentByBot) {
+      continue;
+    }
+
     // ── ANTI-REPLAY GUARDS ──
     if (isHistoricalMessage(msg)) continue;
 

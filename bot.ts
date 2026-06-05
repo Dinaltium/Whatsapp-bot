@@ -533,6 +533,21 @@ async function startBot(): Promise<void> {
   });
   activeSocket = sock;
 
+  // Intercept and cache all bot-sent message IDs to prevent self-loops
+  const originalSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (...args: any[]) => {
+    const result = await (originalSendMessage as any)(...args);
+    if (result && result.key && result.key.id) {
+      try {
+        const { redis } = await import("./storage/redisClient");
+        await redis.setex(`bot_sent_msg:${result.key.id}`, 600, "1");
+      } catch (err) {
+        console.error("[LoopPrevention] Failed to cache sent message ID:", err);
+      }
+    }
+    return result;
+  };
+
   sock.ev.on("creds.update", async () => {
     try {
       await saveCreds();

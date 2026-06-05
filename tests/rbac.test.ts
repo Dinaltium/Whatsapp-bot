@@ -71,6 +71,16 @@ describe("RBAC & JID Normalization", () => {
       expect(isAdminSender(msg, "919902849280@s.whatsapp.net")).toBe(true);
     });
 
+    it("should return true if message key is fromMe", () => {
+      const msg = {
+        key: {
+          fromMe: true,
+          remoteJid: "123@g.us",
+        },
+      } as proto.IWebMessageInfo;
+      expect(isAdminSender(msg)).toBe(true);
+    });
+
     it("should return false for a non-admin JID", () => {
       const msg = {
         key: {
