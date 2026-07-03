@@ -644,10 +644,21 @@ export async function handleMessage(
   let systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
   let modelToUse = GROQ_MODEL_DEFAULT;
 
-  if (requiresCurrentInfo(raw)) {
+  // Query classification: DK24-community questions are answerable from Postgres
+  // (clubs/events/mentors/projects), so answer from the local DB context instead
+  // of burning a live web-search API call — even though they may match the
+  // "current info" pattern (e.g. "who is the mentor for X").
+  const { isCommunityQuery } = await import("../../services/DKB/communityService");
+  if (isCommunityQuery(raw)) {
+    console.info(`[SELF] Community query — using DK24 DB context instead of web search.`);
+    const { buildDynamicContextPrompt } = await import("../../ai/promptBuilder");
+    const dbContext = await buildDynamicContextPrompt(raw);
+    systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nDK24 community database:\n${dbContext}`;
+    modelToUse = GROQ_MODEL_DEFAULT;
+  } else if (requiresCurrentInfo(raw)) {
     console.info(`[SELF] Current info pattern detected in prompt. Triggering web search.`);
     const searchContext = await searchWeb(raw);
-    
+
     if (searchContext) {
       console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
       systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nReal-time web search results:\n${searchContext}`;
