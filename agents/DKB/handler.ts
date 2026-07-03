@@ -4,6 +4,7 @@ import { getGroqReply } from "./prompt";
 import { handleMentorDialogs, handleMentorCommand } from "./commands/mentorCommands";
 import { handleClubCommand } from "./commands/clubCommands";
 import { handleEventCommand } from "./commands/eventCommands";
+import { handleProjectCommand } from "./commands/projectCommands";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -65,6 +66,10 @@ export async function handleMessage(
   // 3. Event commands
   const eventResult = await handleEventCommand(session, userPrompt, trimmed, lowerPrompt, isAdmin, senderJid);
   if (eventResult) return eventResult;
+
+  // 3b. Project commands
+  const projectResult = await handleProjectCommand(session, userPrompt, trimmed, lowerPrompt, isAdmin, senderJid);
+  if (projectResult) return projectResult;
 
   // 4. Mentor commands
   const mentorResult = await handleMentorCommand(session, userPrompt, trimmed, lowerPrompt, isAdmin, senderJid);

@@ -8,6 +8,7 @@ export const RBAC_PERMISSIONS = [
   "role.manage",
   "club.manage",
   "event.manage",
+  "project.manage",
 ] as const;
 
 export type RbacPermission = (typeof RBAC_PERMISSIONS)[number];

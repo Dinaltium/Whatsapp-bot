@@ -610,6 +610,8 @@ async function processInboundMessage(
         "club",
         "events",
         "event",
+        "projects",
+        "project",
         "mentors",
         "mentor",
         "next",

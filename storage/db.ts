@@ -111,6 +111,19 @@ export async function ensureSchema(): Promise<void> {
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS dk24_projects (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        tags TEXT[],
+        image TEXT,
+        link TEXT,
+        github TEXT,
+        categories TEXT[],
+        contributors JSONB NOT NULL DEFAULT '[]'::jsonb,
+        last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS dk24_cache_log (
         key TEXT PRIMARY KEY,
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()

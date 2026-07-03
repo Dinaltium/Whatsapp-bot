@@ -26,6 +26,8 @@ export const DKB_HELP_TEXT = [
   "\u2022 !club <name> - Get detailed spotlight card for a specific member community",
   "\u2022 !events [monthYear] - List chronological events (e.g. !events may-2026)",
   "\u2022 !event <name> - Get details, timeline, and registration links for an event",
+  "\u2022 !projects - List community projects built within the DK24 network",
+  "\u2022 !project <name> - Get details, tech stack, contributors, and links for a project",
   "\u2022 !mentors [page] - List mentors in alphabetical order (10 per page)",
   "\u2022 !mentor -id <id> - View full details for a specific mentor by ID",
   "\u2022 !mentor -f <letter_or_query> [page] - Filter mentors by name",

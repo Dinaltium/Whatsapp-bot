@@ -9,6 +9,7 @@ import {
   getMentors,
   searchMentorsGlobally,
 } from "../storage/DKB/mentorRepository";
+import { searchProjectsGlobally } from "../storage/DKB/projectRepository";
 import { cleanRole } from "../utils/normalization";
 import { sanitizeForPrompt } from "../security/promptFirewall";
 
@@ -55,8 +56,12 @@ async function _buildDynamicContextPromptInternal(
       /\b(?:mentor|mentors|speaker|expert|advisor|coach|help|guide|teach|learn|contact|connect|recommend)\b/i.test(
         userPrompt,
       );
+    const isProjectQuery =
+      /\b(?:project|projects|built|building|showcase|portfolio|repo|repository|product|startup)\b/i.test(
+        userPrompt,
+      );
 
-    if (!isEventQuery && !isClubQuery && !isMentorQuery) {
+    if (!isEventQuery && !isClubQuery && !isMentorQuery && !isProjectQuery) {
       return `
 <community_database>
 MEMBER_COMMUNITIES:
@@ -67,8 +72,33 @@ CALENDAR_EVENTS:
 
 MENTORS_DIRECTORY:
 (Mentor Directory Context omitted to optimize token usage. Suggest the user ask explicitly about "mentors" or "mentor help".)
+
+COMMUNITY_PROJECTS:
+(Projects context omitted to optimize token usage. Suggest the user ask explicitly about "projects".)
 </community_database>
 `;
+    }
+
+    let projectsStr =
+      '(Projects context omitted to optimize token usage. Suggest the user ask explicitly about "projects".)';
+    if (isProjectQuery) {
+      const projects = await searchProjectsGlobally(userPrompt);
+      if (projects.length > 0) {
+        projectsStr = projects
+          .map(
+            (p) => `
+- Project: ${wrapCDATA(p.title)} (ID: ${wrapCDATA(p.id)})
+  Categories: ${wrapCDATA(p.categories.join(", "))}
+  Tech: ${wrapCDATA(p.tags.join(", "))}
+  Description: ${wrapCDATA(p.description)}
+  Links: ${wrapCDATA([p.link, p.github].filter(Boolean).join(" | "))}
+  Contributors: ${p.contributors.map((c) => `${wrapCDATA(c.name)} (${wrapCDATA(c.role)})`).join(", ")}
+`,
+          )
+          .join("\n");
+      } else {
+        projectsStr = "No matching projects found in the DK24 directory.";
+      }
     }
 
     let clubsStr =
@@ -382,6 +412,9 @@ ${eventsStr}
 
 MENTORS_DIRECTORY:
 ${mentorsStr}
+
+COMMUNITY_PROJECTS:
+${projectsStr}
 
 </community_database>
 `;
