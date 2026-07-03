@@ -31,7 +31,6 @@ export const GROQ_API_KEY = process.env.GROQ_API_KEY;
 export const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const ALLOW_FROM_ME_MESSAGES =
   (process.env.ALLOW_FROM_ME_MESSAGES || "false").toLowerCase() === "true";
-const AI_SESSION_TTL_MS = 15 * 60 * 1000;
 const AI_MAX_SESSION_MESSAGES = 8;
 
 let activeSocket: any = null;
@@ -39,50 +38,10 @@ export function getActiveSocket() {
   return activeSocket;
 }
 
-interface UserSession {
-  domainUnlocked: boolean;
-  lastActiveAt: number;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
-  pendingMentor?: {
-    name: string;
-    organization: string;
-    description?: string;
-    expertise?: string;
-    linkedin?: string;
-    instagram?: string;
-    github?: string;
-    email?: string;
-    phoneNoCountryCode: string;
-  };
-  pendingEdit?: {
-    mentorId: number;
-    flag: string;
-    phoneNoCountryCode: string;
-  };
-  pendingDeleteGroup?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-  pendingDeleteChat?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-  pendingEditGroup?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-  pendingEditChat?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-}
-
-const userAiSessions = new Map<string, UserSession>();
+// Session state lives exclusively in Redis (core/state.ts). The former
+// in-memory userAiSessions Map + UserSession interface were dead — nothing on
+// the live message path read them — and have been removed to avoid a second,
+// divergent source of truth.
 
 function printBanner(): void {
   console.log("\nWhatsApp Bot Coordinator Online.");
@@ -426,37 +385,8 @@ export function buildSessionKey(from: string, senderId: string): string {
   return `${from}:${senderId}`;
 }
 
-export function getOrCreateSession(
-  from: string,
-  senderId: string,
-): UserSession {
-  const sessionKey = buildSessionKey(from, senderId);
-
-  if (!userAiSessions.has(sessionKey)) {
-    userAiSessions.set(sessionKey, {
-      domainUnlocked: false,
-      lastActiveAt: 0,
-      messages: [],
-    });
-  }
-
-  return userAiSessions.get(sessionKey)!;
-}
-
-export function resetSessionIfExpired(session: UserSession): void {
-  if (!session.lastActiveAt) return;
-
-  const isExpired = Date.now() - session.lastActiveAt > AI_SESSION_TTL_MS;
-
-  if (isExpired) {
-    session.domainUnlocked = false;
-    session.messages = [];
-    session.lastActiveAt = 0;
-  }
-}
-
 export function addSessionMessage(
-  session: UserSession,
+  session: { messages: Array<{ role: "user" | "assistant"; content: string }> },
   role: "user" | "assistant",
   content: string,
 ): void {
