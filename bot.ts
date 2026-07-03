@@ -21,6 +21,7 @@ import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
 import { getJidHash, logStructured, logEvent } from "./utils/logger";
 import { normalizeJid, isAdminSender } from "./security/rbac";
+import { scrubSecrets } from "./security/secretScrubber";
 import { calculateTypingDelay } from "./utils/typingDelay";
 import { startHealthServer } from "./infrastructure/health/healthServer";
 import { registerContactSyncHandlers } from "./infrastructure/whatsapp/contactSync";
@@ -125,7 +126,17 @@ export async function sendBotReply(
   } catch (err) {}
 
   const trimmedText = String(text || "").trim();
-  let finalText = trimmedText;
+
+  // ── OUTBOUND SECRET SCRUB ────────────────────────────────────────
+  // Never let a key / DB URL / token echo out (defense in depth). PII like
+  // mentor emails is intentionally left intact.
+  const { scrubbed, hits } = scrubSecrets(trimmedText);
+  if (hits.length) {
+    console.warn(
+      `[SecretScrubber] Redacted ${hits.join(", ")} from outbound message to ${getJidHash(to)}`,
+    );
+  }
+  let finalText = scrubbed;
 
   // ── OPTIONAL BROADCAST FINGERPRINT VARIATION ─────────────────────
   // Off by default: WhatsApp can also read hidden characters as a spam signal,
@@ -134,20 +145,18 @@ export async function sendBotReply(
   // body has been sent repeatedly within the hour, to break an identical
   // multi-recipient fingerprint.
   if (
-    trimmedText &&
+    finalText &&
     (process.env.DEDUP_VARY_BROADCAST || "").toLowerCase() === "true"
   ) {
     try {
       const { redis } = await import("./storage/redisClient");
-      const bodyHash = crypto
-        .createHash("sha1")
-        .update(trimmedText)
-        .digest("hex");
+      const baseText = finalText;
+      const bodyHash = crypto.createHash("sha1").update(baseText).digest("hex");
       const key = `sent_body:${bodyHash}`;
       const seen = await redis.incr(key);
       if (seen === 1) await redis.expire(key, 3600);
       if (seen > 1) {
-        finalText = trimmedText + WORD_JOINER.repeat(((seen - 2) % 3) + 1);
+        finalText = baseText + WORD_JOINER.repeat(((seen - 2) % 3) + 1);
       }
     } catch {
       /* fail open */

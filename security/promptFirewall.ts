@@ -40,25 +40,13 @@ export async function hasPromptInjection(
     return false;
   }
 
-  // 1b. Dynamic fast-pass: if the query is explicitly about events, clubs, or mentors,
-  // and doesn't contain obvious injection commands, bypass the LLM check to save latency.
-  const eventKeywords =
-    /\b(?:hackfest|hacktofuture|hackathon|event|events|club|clubs|mentor|mentors|community|communities|college|colleges|summit)\b/i;
-  const obviousInjectionPatterns = [
-    /ignore\s+(?:all\s+)?(?:previous\s+)?(?:instructions|directives|rules|guidelines|guardrails|prompts)/i,
-    /system\s+prompt/i,
-    /bypass\s+(?:the\s+)?(?:guardrails|rules|system|security)/i,
-    /you\s+must\s+now/i,
-    /disregard\s+prior/i,
-    /override\s+instructions/i,
-    /acting\s+as\s+an?/i,
-  ];
-  if (
-    eventKeywords.test(lower) &&
-    !obviousInjectionPatterns.some((p) => p.test(lower))
-  ) {
-    return false;
-  }
+  // NOTE: There is deliberately no "event keyword" fast-pass here. Previously a
+  // query containing words like "hackfest"/"mentor" skipped the LLM check
+  // entirely unless it also matched a hardcoded injection pattern — which let a
+  // novel injection phrasing slip through just by including an event keyword.
+  // The local regex below and the LLM classifier (which is explicitly told
+  // those event words are safe) handle legitimate event queries without a
+  // detection-weakening bypass.
 
   // Reject zero-width spaces or hidden unicode separators used for regex obfuscation
   if (/[\u200b-\u200d\ufeff]/g.test(input)) {
