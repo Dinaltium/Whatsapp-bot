@@ -24,6 +24,7 @@ import {
   generateVoiceMessage,
 } from "../../utils/voiceMessage";
 import { searchWeb, requiresCurrentInfo } from "../../utils/webSearch";
+import { parseImageFlag } from "../../utils/imageFlag";
 import chatConfig from "../../config/chatAllowlist";
 import { redis } from "../../storage/redisClient";
 import { getGroqReply } from "../../ai/groqClient";
@@ -114,8 +115,11 @@ export async function handleMessage(
     }
   }
 
-  const cmd = userPrompt.trim().toLowerCase();
-  const raw = userPrompt.trim();
+  // Parse the trailing `-img` image-request flag (see parseImageFlag).
+  const { wantImage, prompt: effectivePrompt } = parseImageFlag(userPrompt);
+
+  const cmd = effectivePrompt.toLowerCase();
+  const raw = effectivePrompt;
 
   // ── !!help ────────────────────────────────────────────────────────────
   if (cmd === "help") {
@@ -683,6 +687,28 @@ export async function handleMessage(
     modelToUse,
     systemPrompt,
   );
+
+  // -img: attach a reference image with the answer as its caption (one message).
+  // Falls back to text-only if no image is found or the send fails.
+  if (wantImage) {
+    try {
+      const { fetchReferenceImage } = await import("../../utils/webSearch");
+      const imgUrl = await fetchReferenceImage(raw);
+      if (imgUrl) {
+        const { scrubSecrets } = await import("../../security/secretScrubber");
+        await sock.sendMessage(from, {
+          image: { url: imgUrl },
+          caption: scrubSecrets(aiReply).scrubbed,
+        });
+        return { reply: "", usedAI: true };
+      }
+    } catch (err) {
+      console.error(
+        "[SELF] -img image fetch/send failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   return { reply: `${aiReply}`, usedAI: true };
 }

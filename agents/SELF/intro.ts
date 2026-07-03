@@ -63,4 +63,5 @@ export const SELF_HELP_TEXT = [
   "• !!reply <style> — Draft reply in style (formal/casual/decline/agree)",
   "• !!search <query> — Web search with real-time results",
   "• !!<any question> — Ask anything, no domain restriction",
+  "• !!<question> -img — Ask and attach a reference image (use \"-\" for a literal hyphen)",
 ].join("\n");
