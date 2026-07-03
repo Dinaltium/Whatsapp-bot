@@ -17,6 +17,29 @@ export function getEncryptionKey(): string {
   return process.env.AUTH_STATE_KEY || process.env.AUTH_STATE_JWT_SECRET || "";
 }
 
+/**
+ * Fail closed: WhatsApp session credentials must not be written to Postgres in
+ * plaintext. If no encryption key is configured, refuse to start rather than
+ * silently degrading. Set ALLOW_UNENCRYPTED_AUTH_STATE=true to explicitly opt
+ * into plaintext storage (not recommended).
+ */
+export function assertAuthEncryptionConfigured(): void {
+  if (getEncryptionKey()) return;
+  const optOut =
+    (process.env.ALLOW_UNENCRYPTED_AUTH_STATE || "").toLowerCase() === "true";
+  if (optOut) {
+    console.warn(
+      "⚠️ AUTH_STATE_KEY is not set — auth state will be stored UNENCRYPTED (ALLOW_UNENCRYPTED_AUTH_STATE=true).",
+    );
+    return;
+  }
+  throw new Error(
+    "FATAL: AUTH_STATE_KEY (or AUTH_STATE_JWT_SECRET) is not set. WhatsApp " +
+      "session credentials would be stored unencrypted in Postgres. Set an " +
+      "encryption key, or set ALLOW_UNENCRYPTED_AUTH_STATE=true to override.",
+  );
+}
+
 export function getDatabaseUrl(): string | undefined {
   return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
 }
@@ -138,6 +161,8 @@ async function readMany(
 export async function useNeonAuthState(
   namespace = DEFAULT_NAMESPACE,
 ): Promise<any> {
+  assertAuthEncryptionConfigured();
+
   const databaseUrl = getDatabaseUrl();
 
   if (!databaseUrl) {
