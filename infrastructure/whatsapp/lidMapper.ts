@@ -42,25 +42,16 @@ export function registerLidMapperHandlers(sock: any): void {
           await storeLidPhoneMapping(resolvedLid, resolvedPn);
         }
 
-        // Auto-register new participant to pendingIntros if action is 'add' and group is Bot 2
+        // On a new member joining a Bot 2 (DKB) group, notify the mentor group
+        // so a human can add them via !addmentor if they're a mentor. No LLM
+        // classification (see introNotifier).
         if (isBot2 && update.action === "add") {
           const targetJid = resolvedPn || pid;
           if (targetJid && !targetJid.endsWith("@g.us")) {
-            // Store in Redis so messageRouter can see it
-            import("../../core/state").then(({ addPendingIntro }) => {
-              addPendingIntro(targetJid, update.id).catch(err => {
-                console.error("Failed to add pending intro to Redis:", err);
-              });
-            }).catch(err => {
-              console.error("Failed to import state in group-participants.update:", err);
-            });
-
-            logStructured({
-              event: "intro_tracker_watch_add_event",
-              bot: 2,
-              groupHash: getJidHash(update.id),
-              targetHash: getJidHash(targetJid),
-            });
+            const { notifyMentorGroupOfNewMember } = await import(
+              "./introNotifier"
+            );
+            await notifyMentorGroupOfNewMember(sock, update.id, targetJid);
           }
         }
       }

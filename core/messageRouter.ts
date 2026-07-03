@@ -16,7 +16,6 @@ import {
   isHistoricalMessage,
   isDuplicateMessage,
 } from "./middleware/antiReplay";
-import { handleIntroDetection } from "./middleware/introDetector";
 import {
   checkAiRateLimit,
   checkGroupAndGlobalLimits,
@@ -73,12 +72,35 @@ export async function handleMessageUpsert(
     type,
     count: messages.length,
   });
+  // Per-message isolation: a throw while processing one message must not drop
+  // the remaining messages in the batch (silent message loss). Each message is
+  // handled independently; failures are logged and skipped.
   for (const msg of messages) {
+    try {
+      await processInboundMessage(sock, msg);
+    } catch (err) {
+      console.error(
+        "[messageRouter] Uncaught error processing message; skipping to next:",
+        err,
+      );
+      logStructured({
+        event: "message_processing_error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+async function processInboundMessage(
+  sock: ReturnType<typeof makeWASocket>,
+  msg: proto.IWebMessageInfo,
+): Promise<void> {
+  {
     const from = msg.key?.remoteJid;
     const textRaw = extractMessageText(msg.message);
     const text = textRaw ? textRaw.trim() : null;
 
-    if (!from) continue;
+    if (!from) return;
 
     // ── LOOP/ECHO PREVENTION (check if sent by bot process) ──
     const msgId = msg.key?.id;
@@ -91,11 +113,11 @@ export async function handleMessageUpsert(
       }
     }
     if (isSentByBot) {
-      continue;
+      return;
     }
 
     // ── ANTI-REPLAY GUARDS ──
-    if (isHistoricalMessage(msg)) continue;
+    if (isHistoricalMessage(msg)) return;
 
     // ── CACHE LATEST VIEW-ONCE MESSAGE ──────────────────────────────────
     if (msg.message) {
@@ -115,7 +137,7 @@ export async function handleMessageUpsert(
       }
     }
 
-    if (await isDuplicateMessage(msg)) continue;
+    if (await isDuplicateMessage(msg)) return;
 
     if (from.endsWith("@g.us")) {
       await redis.setex(
@@ -140,12 +162,8 @@ export async function handleMessageUpsert(
       await setLastUserMessage(`${from}:${senderId}`, text);
     }
 
-    // ── INTRO DETECTION (DKB groups only) ──
-    if (text && from.endsWith("@g.us") && msg.message) {
-      if (await handleIntroDetection(sock, msg, from, senderId, text)) {
-        continue;
-      }
-    }
+    // Member-intro handling is now event-driven (group-participants.update →
+    // introNotifier), not text-scraped here.
 
     // ── CONTEXT CACHING (for !!context, !!summarize, !!tldr features) ─────
     if (text && !msg.key?.fromMe && senderId) {
@@ -168,7 +186,7 @@ export async function handleMessageUpsert(
     if (text && text.startsWith("!!") && !text.startsWith("!!!")) {
       const isAdmin = isAdminSender(msg, senderId);
       if (!isAdmin) {
-        continue; // silent ignore for non-admins
+        return; // silent ignore for non-admins
       }
       const prompt = text.slice(2).trim();
       if (prompt) {
@@ -197,7 +215,7 @@ export async function handleMessageUpsert(
           console.error("[SELF] Handler error:", err);
         }
       }
-      continue;
+      return;
     }
 
     // ── MAJESTIC REVEAL INTERCEPTOR (NO PREFIX REQUIRED) ──
@@ -219,12 +237,12 @@ export async function handleMessageUpsert(
         session: await getSession(buildSessionKey(from || "", senderId)),
       });
       if (wasDispatched) {
-        continue;
+        return;
       }
     }
 
     if (await shouldSkipMessage(sock, msg, from, text, senderId)) {
-      continue;
+      return;
     }
 
     // ── GLOBAL USER RATE LIMIT (non-admins only) ───────────────────────
@@ -240,7 +258,7 @@ export async function handleMessageUpsert(
             "You have reached the global usage limit. Please wait before sending more commands.",
           );
         }
-        continue;
+        return;
       }
     }
 
@@ -261,7 +279,7 @@ export async function handleMessageUpsert(
       );
       if (handled) {
         await saveSession(sessionKey, session);
-        continue;
+        return;
       }
     }
 
@@ -303,7 +321,7 @@ export async function handleMessageUpsert(
         );
       }
       await saveSession(sessionKey, session);
-      continue;
+      return;
     }
 
     if (session.pendingDeleteChat) {
@@ -343,7 +361,7 @@ export async function handleMessageUpsert(
         );
       }
       await saveSession(sessionKey, session);
-      continue;
+      return;
     }
 
     if (session.pendingEditGroup) {
@@ -399,7 +417,7 @@ export async function handleMessageUpsert(
         );
       }
       await saveSession(sessionKey, session);
-      continue;
+      return;
     }
 
     if (session.pendingEditChat) {
@@ -452,7 +470,7 @@ export async function handleMessageUpsert(
         );
       }
       await saveSession(sessionKey, session);
-      continue;
+      return;
     }
 
     // Determine bot number for this group/chat
@@ -480,7 +498,7 @@ export async function handleMessageUpsert(
         from || "",
         "Use ! followed by your question. Example: !How do I optimize API latency?",
       );
-      continue;
+      return;
     }
 
     const parts = userPrompt.split(/\s+/);
@@ -503,7 +521,7 @@ export async function handleMessageUpsert(
       session,
     });
     if (wasDispatched) {
-      continue;
+      return;
     }
 
     // Check Group & Global limits and burst protection
@@ -539,7 +557,7 @@ export async function handleMessageUpsert(
             "Global AI assistant daily quota reached. Please try again tomorrow.",
           );
         }
-        continue;
+        return;
       }
     }
 
@@ -556,7 +574,7 @@ export async function handleMessageUpsert(
         );
       }
 
-      continue;
+      return;
     }
 
     await clearRateLimitNotice(from || "", senderId);
@@ -592,6 +610,8 @@ export async function handleMessageUpsert(
         "club",
         "events",
         "event",
+        "projects",
+        "project",
         "mentors",
         "mentor",
         "next",
@@ -626,7 +646,7 @@ export async function handleMessageUpsert(
             from || "",
             "⚠️ Security Alert: Prompt injection or instruction override attempt detected. Your query has been blocked.",
           );
-          continue;
+          return;
         }
       }
 
@@ -650,19 +670,19 @@ export async function handleMessageUpsert(
       );
 
       if (!agentResult.reply) {
-        continue;
+        return;
       }
 
       if (agentResult.domainLocked) {
         await sendBotReply(sock, from || "", agentResult.reply);
-        continue;
+        return;
       }
 
       if (!agentResult.usedAI) {
         await sendBotReply(sock, from || "", agentResult.reply);
         session.lastActiveAt = Date.now();
         await saveSession(sessionKey, session);
-        continue;
+        return;
       }
 
       session.domainUnlocked = true;

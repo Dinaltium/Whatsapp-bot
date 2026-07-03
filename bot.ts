@@ -5,6 +5,7 @@ import {
   proto,
 } from "@whiskeysockets/baileys";
 import http from "http";
+import crypto from "crypto";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
@@ -20,6 +21,7 @@ import chatConfig from "./config/chatAllowlist";
 import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
 import { getJidHash, logStructured, logEvent } from "./utils/logger";
 import { normalizeJid, isAdminSender } from "./security/rbac";
+import { scrubSecrets } from "./security/secretScrubber";
 import { calculateTypingDelay } from "./utils/typingDelay";
 import { startHealthServer } from "./infrastructure/health/healthServer";
 import { registerContactSyncHandlers } from "./infrastructure/whatsapp/contactSync";
@@ -31,58 +33,42 @@ export const GROQ_API_KEY = process.env.GROQ_API_KEY;
 export const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const ALLOW_FROM_ME_MESSAGES =
   (process.env.ALLOW_FROM_ME_MESSAGES || "false").toLowerCase() === "true";
-const AI_SESSION_TTL_MS = 15 * 60 * 1000;
 const AI_MAX_SESSION_MESSAGES = 8;
+
+// Outgoing send caps. Per-JID limits how much any single recipient gets;
+// the global cap bounds total account-level outbound volume per minute, since
+// WhatsApp's spam detection is per-account and a per-JID limit alone can still
+// spike aggregate volume across many active chats. Global is env-tunable.
+const OUTGOING_PER_JID_PER_MIN = 5;
+const OUTGOING_GLOBAL_PER_MIN =
+  Number(process.env.OUTGOING_GLOBAL_PER_MIN) || 15;
+
+// U+2060 WORD JOINER — a zero-width, non-breaking invisible character used to
+// vary an otherwise-identical broadcast message body (see sendBotReply).
+const WORD_JOINER = String.fromCharCode(0x2060);
 
 let activeSocket: any = null;
 export function getActiveSocket() {
   return activeSocket;
 }
 
-interface UserSession {
-  domainUnlocked: boolean;
-  lastActiveAt: number;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
-  pendingMentor?: {
-    name: string;
-    organization: string;
-    description?: string;
-    expertise?: string;
-    linkedin?: string;
-    instagram?: string;
-    github?: string;
-    email?: string;
-    phoneNoCountryCode: string;
-  };
-  pendingEdit?: {
-    mentorId: number;
-    flag: string;
-    phoneNoCountryCode: string;
-  };
-  pendingDeleteGroup?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-  pendingDeleteChat?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-  pendingEditGroup?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
-  pendingEditChat?: {
-    id: number;
-    jid: string;
-    botNumber: number;
-  };
+// Exponential-backoff reconnect scheduler. Reset to 0 whenever the connection
+// opens successfully, so transient drops reconnect fast but a persistently
+// failing endpoint backs off instead of thrashing (and risking a ban).
+let reconnectAttempts = 0;
+function scheduleReconnect(baseMs: number, reason: string): void {
+  const attempt = ++reconnectAttempts;
+  const backoff = Math.min(baseMs * Math.pow(2, attempt - 1), 60000);
+  const jitter = Math.floor(Math.random() * 1000);
+  const delay = backoff + jitter;
+  logStructured({ event: "reconnecting", reason, attempt, delayMs: delay });
+  setTimeout(() => startBot(), delay);
 }
 
-const userAiSessions = new Map<string, UserSession>();
+// Session state lives exclusively in Redis (core/state.ts). The former
+// in-memory userAiSessions Map + UserSession interface were dead — nothing on
+// the live message path read them — and have been removed to avoid a second,
+// divergent source of truth.
 
 function printBanner(): void {
   console.log("\nWhatsApp Bot Coordinator Online.");
@@ -93,15 +79,29 @@ export async function sendBotReply(
   to: string,
   text: string,
 ): Promise<void> {
-  // ── OUTGOING RATE GUARD (Task 3.2) ────────────────────────────
+  // ── OUTGOING RATE GUARD ───────────────────────────────────────
   try {
     const { redis } = await import("./storage/redisClient");
-    const minuteKey = `outgoing:${to}:${Math.floor(Date.now() / 60000)}`;
+    const minute = Math.floor(Date.now() / 60000);
+
+    // Per-recipient cap first: cheap, and catches a flood aimed at one JID.
+    const minuteKey = `outgoing:${to}:${minute}`;
     const outgoingCount = await redis.incr(minuteKey);
     if (outgoingCount === 1) await redis.expire(minuteKey, 120);
-    if (outgoingCount > 5) {
+    if (outgoingCount > OUTGOING_PER_JID_PER_MIN) {
       console.warn(
-        `[RateGuard] Suppressed outgoing to ${getJidHash(to)} — limit reached (${outgoingCount}/5)`,
+        `[RateGuard] Suppressed outgoing to ${getJidHash(to)} — per-recipient limit reached (${outgoingCount}/${OUTGOING_PER_JID_PER_MIN})`,
+      );
+      return;
+    }
+
+    // Global account-level cap across ALL recipients this minute.
+    const globalKey = `outgoing:global:${minute}`;
+    const globalCount = await redis.incr(globalKey);
+    if (globalCount === 1) await redis.expire(globalKey, 120);
+    if (globalCount > OUTGOING_GLOBAL_PER_MIN) {
+      console.warn(
+        `[RateGuard] Suppressed outgoing — global account cap reached (${globalCount}/${OUTGOING_GLOBAL_PER_MIN})`,
       );
       return;
     }
@@ -127,16 +127,52 @@ export async function sendBotReply(
 
   const trimmedText = String(text || "").trim();
 
+  // ── OUTBOUND SECRET SCRUB ────────────────────────────────────────
+  // Never let a key / DB URL / token echo out (defense in depth). PII like
+  // mentor emails is intentionally left intact.
+  const { scrubbed, hits } = scrubSecrets(trimmedText);
+  if (hits.length) {
+    console.warn(
+      `[SecretScrubber] Redacted ${hits.join(", ")} from outbound message to ${getJidHash(to)}`,
+    );
+  }
+  let finalText = scrubbed;
+
+  // ── OPTIONAL BROADCAST FINGERPRINT VARIATION ─────────────────────
+  // Off by default: WhatsApp can also read hidden characters as a spam signal,
+  // and identical answers to identical commands are legitimate. When
+  // DEDUP_VARY_BROADCAST=true, append 1-3 invisible word-joiners once the same
+  // body has been sent repeatedly within the hour, to break an identical
+  // multi-recipient fingerprint.
+  if (
+    finalText &&
+    (process.env.DEDUP_VARY_BROADCAST || "").toLowerCase() === "true"
+  ) {
+    try {
+      const { redis } = await import("./storage/redisClient");
+      const baseText = finalText;
+      const bodyHash = crypto.createHash("sha1").update(baseText).digest("hex");
+      const key = `sent_body:${bodyHash}`;
+      const seen = await redis.incr(key);
+      if (seen === 1) await redis.expire(key, 3600);
+      if (seen > 1) {
+        finalText = baseText + WORD_JOINER.repeat(((seen - 2) % 3) + 1);
+      }
+    } catch {
+      /* fail open */
+    }
+  }
+
   // ── REDIS-BACKED ECHO DETECTION (Task 3.4) ───────────────────────
   try {
     const { setLastSentMessage } = await import("./core/state");
-    await setLastSentMessage(to, trimmedText);
+    await setLastSentMessage(to, finalText);
   } catch {
     /* non-fatal */
   }
 
   await sock.sendMessage(to, {
-    text: trimmedText,
+    text: finalText,
   });
 }
 
@@ -426,37 +462,8 @@ export function buildSessionKey(from: string, senderId: string): string {
   return `${from}:${senderId}`;
 }
 
-export function getOrCreateSession(
-  from: string,
-  senderId: string,
-): UserSession {
-  const sessionKey = buildSessionKey(from, senderId);
-
-  if (!userAiSessions.has(sessionKey)) {
-    userAiSessions.set(sessionKey, {
-      domainUnlocked: false,
-      lastActiveAt: 0,
-      messages: [],
-    });
-  }
-
-  return userAiSessions.get(sessionKey)!;
-}
-
-export function resetSessionIfExpired(session: UserSession): void {
-  if (!session.lastActiveAt) return;
-
-  const isExpired = Date.now() - session.lastActiveAt > AI_SESSION_TTL_MS;
-
-  if (isExpired) {
-    session.domainUnlocked = false;
-    session.messages = [];
-    session.lastActiveAt = 0;
-  }
-}
-
 export function addSessionMessage(
-  session: UserSession,
+  session: { messages: Array<{ role: "user" | "assistant"; content: string }> },
   role: "user" | "assistant",
   content: string,
 ): void {
@@ -496,8 +503,10 @@ async function startBot(): Promise<void> {
       if (!persistentAuthStore) {
         persistentAuthStore = await useNeonAuthState("parag");
         console.log("Using Neon PostgreSQL for auth state storage.");
-        const { ensureSchema } = await import("./storage/db");
+        const { ensureSchema, migrateParagToBot3 } = await import("./storage/db");
         await ensureSchema();
+        // Reassign legacy PARAG (bot 0) rows to bot 3 before allowlists load.
+        await migrateParagToBot3();
       } else {
         console.log("Reusing existing auth store for reconnect.");
       }
@@ -573,6 +582,7 @@ async function startBot(): Promise<void> {
     }
 
     if (connection === "open") {
+      reconnectAttempts = 0; // healthy connection — reset backoff
       logStructured({ event: "connection_open", service: "PARAG" });
 
       // ── BOOT NOTIFICATION TO ADMIN (Task 3.9) ──────────────────
@@ -611,19 +621,30 @@ async function startBot(): Promise<void> {
       } catch (e) {}
 
       if (statusCode === 515) {
-        logStructured({ event: "reconnecting", reason: "restart_required" });
-        setTimeout(() => startBot(), 3000);
-      } else if (statusCode === DisconnectReason.loggedOut) {
-        logStructured({ event: "connection_logout" });
+        // restartRequired — expected right after pairing; reconnect quickly.
+        scheduleReconnect(2000, "restart_required");
+      } else if (
+        statusCode === DisconnectReason.loggedOut || // 401 — session revoked
+        statusCode === 403 || // forbidden / banned
+        statusCode === 411 // multi-device mismatch
+      ) {
+        // These need a fresh QR pairing; auto-reconnect would just loop and
+        // re-trigger WhatsApp's fraud heuristics. Stop and wait for a human.
+        logStructured({ event: "connection_logout", statusCode });
       } else if (statusCode === DisconnectReason.connectionReplaced) {
+        // 440 — another instance took over this session. Exit, don't fight it.
         logStructured({
           event: "connection_replaced",
           error: "another_instance",
         });
         process.exit(0);
+      } else if (statusCode === 429) {
+        // WhatsApp rate-limited us. Back off hard to avoid escalating to a ban.
+        scheduleReconnect(30000, "rate_limited");
       } else {
-        logStructured({ event: "reconnecting", reason: "generic_close" });
-        setTimeout(() => startBot(), 5000);
+        // 408 timedOut/connectionLost, 428 connectionClosed, 500 badSession,
+        // 503, or unknown — transient; reconnect with backoff.
+        scheduleReconnect(5000, `generic_close_${statusCode || "unknown"}`);
       }
     }
   });

@@ -47,36 +47,42 @@ export async function handleMessage(
   }
 
   if (normalizedPrompt.startsWith("!projects")) {
-    const projects = await getProjects();
-    const reply = projects.length > 0 
-      ? `Projects:\n${projects.map(p => `- ${p.name}`).join('\n')}` 
-      : "No projects found.";
-    return {
-      reply: formatBotReply(reply),
-      usedAI: false,
-    };
+    try {
+      const projects = await getProjects();
+      const reply = projects.length > 0
+        ? `Projects:\n${projects.map(p => `- ${p.name}`).join('\n')}`
+        : "No projects found.";
+      return { reply: formatBotReply(reply), usedAI: false };
+    } catch (err) {
+      console.error("[ECB] projects command failed:", err instanceof Error ? err.message : err);
+      return { reply: formatBotReply("Couldn't load projects right now. Please try again later."), usedAI: false };
+    }
   }
 
   if (normalizedPrompt.startsWith("!events")) {
-    const events = await getEvents();
-    const reply = events.length > 0 
-      ? `Upcoming Events:\n${events.map(e => `- ${e.title}`).join('\n')}` 
-      : "No upcoming events found.";
-    return {
-      reply: formatBotReply(reply),
-      usedAI: false,
-    };
+    try {
+      const events = await getEvents();
+      const reply = events.length > 0
+        ? `Upcoming Events:\n${events.map(e => `- ${e.title}`).join('\n')}`
+        : "No upcoming events found.";
+      return { reply: formatBotReply(reply), usedAI: false };
+    } catch (err) {
+      console.error("[ECB] events command failed:", err instanceof Error ? err.message : err);
+      return { reply: formatBotReply("Couldn't load events right now. Please try again later."), usedAI: false };
+    }
   }
 
   if (normalizedPrompt.startsWith("!deadlines")) {
-    const deadlines = await getDeadlines();
-    const reply = deadlines.length > 0 
-      ? `Upcoming Deadlines:\n${deadlines.map(d => `- ${d.title}`).join('\n')}` 
-      : "No upcoming deadlines found.";
-    return {
-      reply: formatBotReply(reply),
-      usedAI: false,
-    };
+    try {
+      const deadlines = await getDeadlines();
+      const reply = deadlines.length > 0
+        ? `Upcoming Deadlines:\n${deadlines.map(d => `- ${d.title}`).join('\n')}`
+        : "No upcoming deadlines found.";
+      return { reply: formatBotReply(reply), usedAI: false };
+    } catch (err) {
+      console.error("[ECB] deadlines command failed:", err instanceof Error ? err.message : err);
+      return { reply: formatBotReply("Couldn't load deadlines right now. Please try again later."), usedAI: false };
+    }
   }
 
   return {

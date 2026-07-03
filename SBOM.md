@@ -29,7 +29,6 @@ These libraries are required for the execution of the bot in development and pro
 | **`jsonwebtoken`** | `^9.0.2` | MIT | Secure JWT packaging for auth payloads stored in Neon DB. |
 | **`pg`** | `^8.16.3` | MIT | PostgreSQL client and connection pooling wrapper. |
 | **`pino`** | `^10.3.1` | MIT | High-performance, low-overhead structured event logger. |
-| **`puppeteer`** | `^24.43.1` | Apache-2.0 | Headless Chromium engine for calendar and communities scraping. |
 | **`qrcode-terminal`** | `^0.12.0` | Apache-2.0 | Standard terminal scan-QR generator on startup. |
 
 ---

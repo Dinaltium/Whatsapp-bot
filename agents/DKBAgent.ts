@@ -1,13 +1,11 @@
-import { BotHandler, BotContext, AgentResult } from "./core/BotHandler";
+import { BotContext, AgentResult } from "./core/BotHandler";
+import { createAgent } from "./core/createAgent";
 import { handleMessage } from "./DKB/handler";
-import { classifyAndAutoAddMentor } from "../services/DKB/mentorService";
 import { DKB_HELP_TEXT } from "./DKB/intro";
 
-const DKBAgent: BotHandler = {
+const DKBAgent = createAgent({
   botId: 2,
   name: "DKB",
-  requiresAllowlist: true as const,
-  isInDomain: (_prompt) => true,
   handleMessage: (ctx: BotContext): Promise<AgentResult> =>
     handleMessage(
       ctx.session,
@@ -18,7 +16,6 @@ const DKBAgent: BotHandler = {
       ctx.senderJid,
     ),
   getHelpText: () => DKB_HELP_TEXT,
-};
+});
 
-export { classifyAndAutoAddMentor };
 export default DKBAgent;

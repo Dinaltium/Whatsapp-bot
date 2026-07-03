@@ -74,7 +74,6 @@ LID senders are resolved before role checks since roles are indexed by phone JID
 
 ## Infrastructure
 
-- **BullMQ workers** — Outgoing message queue (rate-controlled), incoming preprocessing
 - **Reminder scheduler** — Polls `self_reminders` every 60 seconds, sends due reminders
 - **Health server** — HTTP endpoint on `PORT` (default 3000) for hosting platform health checks
 - **Redis** — Session storage, rate limiting, contact names, chat history, idempotency keys

@@ -35,6 +35,16 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
       "!club <name> - Get detailed spotlight card for a specific member community",
     ],
   },
+  {
+    id: 3,
+    name: "Project Commands",
+    permissions: ["project.manage"],
+    description: "Allows viewing and querying the DK24 community project directory.",
+    subcommands: [
+      "!projects - List community projects built within the DK24 network",
+      "!project <name> - Get detailed spotlight for a specific project",
+    ],
+  },
 ];
 
 export async function handleCreateCommand(

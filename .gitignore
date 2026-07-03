@@ -34,12 +34,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Puppeteer
+# Build/tool caches
 .cache/
-
-
-# Puppeteer Cache
-.puppeteer_cache/
 
 test.ts
 
@@ -51,3 +47,6 @@ prompt-review.md
 prompt.md
 promptv2.md
 extra.md
+
+# Local runtime log dumps (may contain session key material)
+logs.md

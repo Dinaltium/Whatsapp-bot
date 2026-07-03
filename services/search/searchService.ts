@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -67,19 +69,48 @@ export function requiresCurrentInfo(prompt: string): boolean {
   return CURRENT_INFO_PATTERNS.some((p) => p.test(prompt));
 }
 
+// Cache results for repeat questions to cut API cost + latency. Recency-
+// sensitive queries (live scores, "latest", etc.) are never cached so they
+// stay fresh. Env-tunable TTL.
+const SEARCH_CACHE_TTL_SEC =
+  Number(process.env.SEARCH_CACHE_TTL_SEC) || 6 * 60 * 60;
+
+export function searchCacheKey(query: string): string {
+  const norm = query.trim().toLowerCase().replace(/\s+/g, " ");
+  return `websearch:${crypto.createHash("sha1").update(norm).digest("hex")}`;
+}
+
 function preferFirecrawl(prompt: string): boolean {
   return FIRECRAWL_PATTERNS.some((p) => p.test(prompt));
 }
 
 export async function searchWeb(query: string): Promise<SearchResponse> {
   const empty: SearchResponse = { provider: "tavily", results: [] };
+
+  const needsLiveData = RECENCY_SENSITIVE_PATTERNS.some((p) => p.test(query));
+  const urlMatch = query.match(/https?:\/\/\S+/i);
+  // Recency-sensitive or single-URL extraction requests are always fetched
+  // live; everything else is cacheable.
+  const cacheable = !needsLiveData && !urlMatch;
+  const cacheKey = searchCacheKey(query);
+
+  if (cacheable) {
+    try {
+      const { redis } = await import("../../storage/redisClient");
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        console.info("[SearchService] cache hit for query");
+        return JSON.parse(cached) as SearchResponse;
+      }
+    } catch {
+      /* fail open — never block search on Redis error */
+    }
+  }
+
   try {
     const { rerankResults } = await import("./reranker");
 
-    const urlMatch = query.match(/https?:\/\/\S+/i);
     let result: SearchResponse | null = null;
-    
-    const needsLiveData = RECENCY_SENSITIVE_PATTERNS.some((p) => p.test(query));
 
     if (urlMatch) {
       const { extractWithFirecrawl } = await import("./providers/firecrawl");
@@ -108,6 +139,18 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
     
     if (result && result.results && result.results.length > 0) {
       result.results = rerankResults(query, result.results);
+      if (cacheable) {
+        try {
+          const { redis } = await import("../../storage/redisClient");
+          await redis.setex(
+            cacheKey,
+            SEARCH_CACHE_TTL_SEC,
+            JSON.stringify(result),
+          );
+        } catch {
+          /* fail open — caching is best-effort */
+        }
+      }
       return result;
     }
     return empty;

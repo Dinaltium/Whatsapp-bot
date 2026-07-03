@@ -53,7 +53,6 @@ export interface UserSession {
 }
 
 const AI_SESSION_TTL_SEC = 15 * 60; // 15 mins
-const INTRO_TTL_SEC = 24 * 60 * 60; // 24 hours
 
 // --- User Sessions ---
 export async function getSession(sessionKey: string): Promise<UserSession> {
@@ -91,33 +90,4 @@ export async function getLastUserMessage(sessionKey: string): Promise<string | n
 
 export async function setLastUserMessage(sessionKey: string, message: string): Promise<void> {
   await redis.setex(`last_user_msg:${sessionKey}`, AI_SESSION_TTL_SEC, message);
-}
-
-// --- Pending Intros ---
-export async function addPendingIntro(jid: string, groupJid: string): Promise<void> {
-  await redis.setex(`pending_intro:${jid}`, INTRO_TTL_SEC, groupJid);
-}
-
-export async function getPendingIntro(jid: string): Promise<string | null> {
-  return redis.get(`pending_intro:${jid}`);
-}
-
-export async function removePendingIntro(jid: string): Promise<void> {
-  await redis.del(`pending_intro:${jid}`);
-}
-
-export async function getAllPendingIntros(): Promise<{ [jid: string]: string }> {
-  // Use scan or keys. Given low cardinality, keys is okay but scan is safer.
-  const keys = await redis.keys("pending_intro:*");
-  if (!keys || keys.length === 0) return {};
-
-  const intros: { [jid: string]: string } = {};
-  const values = await redis.mget(...keys);
-  for (let i = 0; i < keys.length; i++) {
-    const jid = keys[i].replace("pending_intro:", "");
-    if (values[i]) {
-      intros[jid] = values[i] as string;
-    }
-  }
-  return intros;
 }

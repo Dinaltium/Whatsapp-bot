@@ -63,6 +63,14 @@ export async function handleMessage(
     return { reply: formatBotReply(reply), usedAI: false };
   }
 
-  const aiReply = await getGroqReply(session.messages, groqApiKey, groqModel, PARAG_SYSTEM_PROMPT);
-  return { reply: formatBotReply(aiReply), usedAI: true };
+  try {
+    const aiReply = await getGroqReply(session.messages, groqApiKey, groqModel, PARAG_SYSTEM_PROMPT);
+    return { reply: formatBotReply(aiReply), usedAI: true };
+  } catch (err) {
+    console.error("[PARAG] AI reply failed:", err instanceof Error ? err.message : err);
+    return {
+      reply: formatBotReply("I'm having trouble answering right now. Please try again shortly."),
+      usedAI: false,
+    };
+  }
 }

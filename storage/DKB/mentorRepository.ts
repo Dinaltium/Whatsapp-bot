@@ -102,28 +102,65 @@ export async function deleteMentor(query: string): Promise<boolean> {
   }
 }
 
-export async function getMentors(filter?: string): Promise<Mentor[]> {
+function buildMentorFilterClause(filter?: string): {
+  clause: string;
+  params: string[];
+} {
+  const params: string[] = [];
+  let clause = "";
+  if (filter && filter.trim()) {
+    const trimmed = filter.trim().toLowerCase();
+    clause = ` WHERE LOWER(name) LIKE $1`;
+    params.push(trimmed.length === 1 ? `${trimmed}%` : `%${trimmed}%`);
+  }
+  return { clause, params };
+}
+
+/**
+ * Fetches mentors, optionally filtered by name and paginated at the DB layer.
+ * When limit/offset are omitted the full set is returned (legacy callers).
+ */
+export async function getMentors(
+  filter?: string,
+  limit?: number,
+  offset?: number,
+): Promise<Mentor[]> {
   const pool = getPool();
   if (!pool) return [];
   try {
-    let queryStr = `SELECT id, name, expertise, linkedin, organization, description, instagram, github, email, phone, added_by, created_at FROM dk24_mentors`;
-    const params: string[] = [];
-    if (filter && filter.trim()) {
-      const trimmed = filter.trim().toLowerCase();
-      if (trimmed.length === 1) {
-        queryStr += ` WHERE LOWER(name) LIKE $1`;
-        params.push(`${trimmed}%`);
-      } else {
-        queryStr += ` WHERE LOWER(name) LIKE $1`;
-        params.push(`%${trimmed}%`);
-      }
+    const { clause, params } = buildMentorFilterClause(filter);
+    const qParams: (string | number)[] = [...params];
+    let queryStr = `SELECT id, name, expertise, linkedin, organization, description, instagram, github, email, phone, added_by, created_at FROM dk24_mentors${clause} ORDER BY name ASC`;
+    if (typeof limit === "number") {
+      qParams.push(limit);
+      queryStr += ` LIMIT $${qParams.length}`;
     }
-    queryStr += ` ORDER BY name ASC`;
-    const res = await pool.query(queryStr, params);
+    if (typeof offset === "number") {
+      qParams.push(offset);
+      queryStr += ` OFFSET $${qParams.length}`;
+    }
+    const res = await pool.query(queryStr, qParams);
     return res.rows as Mentor[];
   } catch (error) {
     console.error("⚠️ Error fetching mentors:", error);
     return [];
+  }
+}
+
+/** Counts mentors matching an optional name filter (for pagination totals). */
+export async function countMentors(filter?: string): Promise<number> {
+  const pool = getPool();
+  if (!pool) return 0;
+  try {
+    const { clause, params } = buildMentorFilterClause(filter);
+    const res = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM dk24_mentors${clause}`,
+      params,
+    );
+    return res.rows[0]?.count ?? 0;
+  } catch (error) {
+    console.error("⚠️ Error counting mentors:", error);
+    return 0;
   }
 }
 

@@ -8,9 +8,24 @@ export const RBAC_PERMISSIONS = [
   "role.manage",
   "club.manage",
   "event.manage",
+  "project.manage",
 ] as const;
 
 export type RbacPermission = (typeof RBAC_PERMISSIONS)[number];
+
+/**
+ * Permissions that confer administrative control. Assigning any role bearing
+ * one of these is restricted to hard-admins (the owner) — a role.manage holder
+ * must never be able to propagate admin-level power to another user. Only
+ * event/club "directory viewing" permissions are considered non-privileged.
+ */
+export const PRIVILEGED_PERMISSIONS: readonly string[] = [
+  "role.manage",
+  "mentor.manage",
+  "allowlist.manage",
+  "bot.manage",
+  "db.manage",
+];
 
 export interface RbacRole {
   name: string;
@@ -358,6 +373,18 @@ export async function listManagedRoles(): Promise<RbacRole[]> {
     console.error("Error listing managed roles:", error);
     return [];
   }
+}
+
+/**
+ * True if the named role carries any administrative (privileged) permission.
+ * Used to gate role assignment so only the owner can hand out admin power.
+ */
+export async function roleHasPrivilegedPermission(
+  role: string,
+): Promise<boolean> {
+  const managed = await getManagedRole(role);
+  if (!managed) return false;
+  return managed.permissions.some((p) => PRIVILEGED_PERMISSIONS.includes(p));
 }
 
 export async function getManagedRole(role: string): Promise<RbacRole | null> {

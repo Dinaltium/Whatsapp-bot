@@ -24,6 +24,8 @@ import {
   generateVoiceMessage,
 } from "../../utils/voiceMessage";
 import { searchWeb, requiresCurrentInfo } from "../../utils/webSearch";
+import { parseImageFlag } from "../../utils/imageFlag";
+import chatConfig from "../../config/chatAllowlist";
 import { redis } from "../../storage/redisClient";
 import { getGroqReply } from "../../ai/groqClient";
 import * as fs from "fs";
@@ -113,8 +115,11 @@ export async function handleMessage(
     }
   }
 
-  const cmd = userPrompt.trim().toLowerCase();
-  const raw = userPrompt.trim();
+  // Parse the trailing `-img` image-request flag (see parseImageFlag).
+  const { wantImage, prompt: effectivePrompt } = parseImageFlag(userPrompt);
+
+  const cmd = effectivePrompt.toLowerCase();
+  const raw = effectivePrompt;
 
   // ── !!help ────────────────────────────────────────────────────────────
   if (cmd === "help") {
@@ -131,7 +136,7 @@ export async function handleMessage(
     const topic = parts.slice(1).join(" ").toLowerCase();
 
     let docContent: string | null = null;
-    if (topic.includes("parag") || topic.includes("bot 0")) {
+    if (topic.includes("parag") || topic.includes("bot 3")) {
       docContent = loadDocFile("bot-parag.md");
     } else if (
       topic.includes("dkb") ||
@@ -486,14 +491,37 @@ export async function handleMessage(
     };
   }
 
-  // ── !!voice <text> (or reply) ─────────────────────────────────────────
+  // ── !!voice [-id <n>] <text> (or reply) ───────────────────────────────
+  // Optional `-id <n>` routes the voice note to saved chat-allowlist entry n
+  // (same id space as !listchats) instead of the current chat.
   if (cmd.startsWith("voice") && (cmd === "voice" || cmd.startsWith("voice "))) {
+    const voiceArgs = raw.slice("voice".length).trim();
+
+    let destJid = from;
+    let destLabel = "this chat";
+    let spokenArgs = voiceArgs;
+
+    const idMatch = voiceArgs.match(/^-id\s+(\d+)\s*([\s\S]*)$/i);
+    if (idMatch) {
+      const chatId = parseInt(idMatch[1], 10);
+      spokenArgs = idMatch[2].trim();
+      const entry = chatConfig.getChatEntryById(chatId);
+      if (!entry) {
+        return {
+          reply: `No saved chat found with id ${chatId}. Use !listchats to see ids.`,
+          usedAI: false,
+        };
+      }
+      destJid = entry.jid;
+      destLabel = `+${entry.jid.split("@")[0]}`;
+    }
+
     const quotedText = getQuotedText(msg);
-    const textToSpeak = quotedText || raw.slice("voice".length).trim();
+    const textToSpeak = quotedText || spokenArgs;
 
     if (!textToSpeak) {
       return {
-        reply: `Usage: !!voice <text> (or reply to a message)`,
+        reply: `Usage: !!voice [-id <n>] <text> (or reply to a message). Use !listchats for ids.`,
         usedAI: false,
       };
     }
@@ -504,6 +532,8 @@ export async function handleMessage(
       };
     }
 
+    // Daily voice limit is global across all destinations (a single leash),
+    // so routing to different ids can't multiply the cap.
     const limitCheck = await checkVoiceLimit();
     if (!limitCheck.allowed) {
       return {
@@ -522,7 +552,7 @@ export async function handleMessage(
     }
 
     try {
-      await sock.sendMessage(from, {
+      await sock.sendMessage(destJid, {
         audio: result.audioBuffer,
         mimetype: "audio/wav",
         ptt: true,
@@ -534,7 +564,11 @@ export async function handleMessage(
         usedAI: false,
       };
     }
-    return { reply: "", usedAI: false }; // audio already sent
+    // Confirm to the operator when the note went somewhere other than here.
+    return {
+      reply: destJid === from ? "" : `Voice note sent to ${destLabel}.`,
+      usedAI: false,
+    };
   }
 
   // ── !!reply <style> (reply) ───────────────────────────────────────────
@@ -614,10 +648,21 @@ export async function handleMessage(
   let systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
   let modelToUse = GROQ_MODEL_DEFAULT;
 
-  if (requiresCurrentInfo(raw)) {
+  // Query classification: DK24-community questions are answerable from Postgres
+  // (clubs/events/mentors/projects), so answer from the local DB context instead
+  // of burning a live web-search API call — even though they may match the
+  // "current info" pattern (e.g. "who is the mentor for X").
+  const { isCommunityQuery } = await import("../../services/DKB/communityService");
+  if (isCommunityQuery(raw)) {
+    console.info(`[SELF] Community query — using DK24 DB context instead of web search.`);
+    const { buildDynamicContextPrompt } = await import("../../ai/promptBuilder");
+    const dbContext = await buildDynamicContextPrompt(raw);
+    systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nDK24 community database:\n${dbContext}`;
+    modelToUse = GROQ_MODEL_DEFAULT;
+  } else if (requiresCurrentInfo(raw)) {
     console.info(`[SELF] Current info pattern detected in prompt. Triggering web search.`);
     const searchContext = await searchWeb(raw);
-    
+
     if (searchContext) {
       console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
       systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nReal-time web search results:\n${searchContext}`;
@@ -642,6 +687,28 @@ export async function handleMessage(
     modelToUse,
     systemPrompt,
   );
+
+  // -img: attach a reference image with the answer as its caption (one message).
+  // Falls back to text-only if no image is found or the send fails.
+  if (wantImage) {
+    try {
+      const { fetchReferenceImage } = await import("../../utils/webSearch");
+      const imgUrl = await fetchReferenceImage(raw);
+      if (imgUrl) {
+        const { scrubSecrets } = await import("../../security/secretScrubber");
+        await sock.sendMessage(from, {
+          image: { url: imgUrl },
+          caption: scrubSecrets(aiReply).scrubbed,
+        });
+        return { reply: "", usedAI: true };
+      }
+    } catch (err) {
+      console.error(
+        "[SELF] -img image fetch/send failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   return { reply: `${aiReply}`, usedAI: true };
 }

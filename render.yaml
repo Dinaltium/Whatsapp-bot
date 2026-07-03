@@ -16,6 +16,8 @@ services:
         value: "true"
       - key: ADMIN_JIDS
         sync: false
+      - key: AUTH_STATE_KEY
+        sync: false
       - key: ALLOWED_GROUPS_FILE
         value: allowed-groups.json
       - key: ALLOWED_CHATS_FILE

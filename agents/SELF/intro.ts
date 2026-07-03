@@ -59,8 +59,9 @@ export const SELF_HELP_TEXT = [
   "• !!tldr [count] — Summarize last N messages (default 20)",
   "• !!tone — Detect emotional tone of replied message",
   "• !!find <keyword> — Search chat history for keyword",
-  "• !!voice <text> — Generate voice message (or reply to text)",
+  "• !!voice [-id <n>] <text> — Voice message here, or to saved chat n (see !listchats)",
   "• !!reply <style> — Draft reply in style (formal/casual/decline/agree)",
   "• !!search <query> — Web search with real-time results",
   "• !!<any question> — Ask anything, no domain restriction",
+  "• !!<question> -img — Ask and attach a reference image (use \"-\" for a literal hyphen)",
 ].join("\n");
