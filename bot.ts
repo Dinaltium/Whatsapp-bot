@@ -33,6 +33,14 @@ const ALLOW_FROM_ME_MESSAGES =
   (process.env.ALLOW_FROM_ME_MESSAGES || "false").toLowerCase() === "true";
 const AI_MAX_SESSION_MESSAGES = 8;
 
+// Outgoing send caps. Per-JID limits how much any single recipient gets;
+// the global cap bounds total account-level outbound volume per minute, since
+// WhatsApp's spam detection is per-account and a per-JID limit alone can still
+// spike aggregate volume across many active chats. Global is env-tunable.
+const OUTGOING_PER_JID_PER_MIN = 5;
+const OUTGOING_GLOBAL_PER_MIN =
+  Number(process.env.OUTGOING_GLOBAL_PER_MIN) || 15;
+
 let activeSocket: any = null;
 export function getActiveSocket() {
   return activeSocket;
@@ -52,15 +60,29 @@ export async function sendBotReply(
   to: string,
   text: string,
 ): Promise<void> {
-  // ── OUTGOING RATE GUARD (Task 3.2) ────────────────────────────
+  // ── OUTGOING RATE GUARD ───────────────────────────────────────
   try {
     const { redis } = await import("./storage/redisClient");
-    const minuteKey = `outgoing:${to}:${Math.floor(Date.now() / 60000)}`;
+    const minute = Math.floor(Date.now() / 60000);
+
+    // Per-recipient cap first: cheap, and catches a flood aimed at one JID.
+    const minuteKey = `outgoing:${to}:${minute}`;
     const outgoingCount = await redis.incr(minuteKey);
     if (outgoingCount === 1) await redis.expire(minuteKey, 120);
-    if (outgoingCount > 5) {
+    if (outgoingCount > OUTGOING_PER_JID_PER_MIN) {
       console.warn(
-        `[RateGuard] Suppressed outgoing to ${getJidHash(to)} — limit reached (${outgoingCount}/5)`,
+        `[RateGuard] Suppressed outgoing to ${getJidHash(to)} — per-recipient limit reached (${outgoingCount}/${OUTGOING_PER_JID_PER_MIN})`,
+      );
+      return;
+    }
+
+    // Global account-level cap across ALL recipients this minute.
+    const globalKey = `outgoing:global:${minute}`;
+    const globalCount = await redis.incr(globalKey);
+    if (globalCount === 1) await redis.expire(globalKey, 120);
+    if (globalCount > OUTGOING_GLOBAL_PER_MIN) {
+      console.warn(
+        `[RateGuard] Suppressed outgoing — global account cap reached (${globalCount}/${OUTGOING_GLOBAL_PER_MIN})`,
       );
       return;
     }
