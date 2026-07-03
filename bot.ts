@@ -46,6 +46,19 @@ export function getActiveSocket() {
   return activeSocket;
 }
 
+// Exponential-backoff reconnect scheduler. Reset to 0 whenever the connection
+// opens successfully, so transient drops reconnect fast but a persistently
+// failing endpoint backs off instead of thrashing (and risking a ban).
+let reconnectAttempts = 0;
+function scheduleReconnect(baseMs: number, reason: string): void {
+  const attempt = ++reconnectAttempts;
+  const backoff = Math.min(baseMs * Math.pow(2, attempt - 1), 60000);
+  const jitter = Math.floor(Math.random() * 1000);
+  const delay = backoff + jitter;
+  logStructured({ event: "reconnecting", reason, attempt, delayMs: delay });
+  setTimeout(() => startBot(), delay);
+}
+
 // Session state lives exclusively in Redis (core/state.ts). The former
 // in-memory userAiSessions Map + UserSession interface were dead — nothing on
 // the live message path read them — and have been removed to avoid a second,
@@ -525,6 +538,7 @@ async function startBot(): Promise<void> {
     }
 
     if (connection === "open") {
+      reconnectAttempts = 0; // healthy connection — reset backoff
       logStructured({ event: "connection_open", service: "PARAG" });
 
       // ── BOOT NOTIFICATION TO ADMIN (Task 3.9) ──────────────────
@@ -563,19 +577,30 @@ async function startBot(): Promise<void> {
       } catch (e) {}
 
       if (statusCode === 515) {
-        logStructured({ event: "reconnecting", reason: "restart_required" });
-        setTimeout(() => startBot(), 3000);
-      } else if (statusCode === DisconnectReason.loggedOut) {
-        logStructured({ event: "connection_logout" });
+        // restartRequired — expected right after pairing; reconnect quickly.
+        scheduleReconnect(2000, "restart_required");
+      } else if (
+        statusCode === DisconnectReason.loggedOut || // 401 — session revoked
+        statusCode === 403 || // forbidden / banned
+        statusCode === 411 // multi-device mismatch
+      ) {
+        // These need a fresh QR pairing; auto-reconnect would just loop and
+        // re-trigger WhatsApp's fraud heuristics. Stop and wait for a human.
+        logStructured({ event: "connection_logout", statusCode });
       } else if (statusCode === DisconnectReason.connectionReplaced) {
+        // 440 — another instance took over this session. Exit, don't fight it.
         logStructured({
           event: "connection_replaced",
           error: "another_instance",
         });
         process.exit(0);
+      } else if (statusCode === 429) {
+        // WhatsApp rate-limited us. Back off hard to avoid escalating to a ban.
+        scheduleReconnect(30000, "rate_limited");
       } else {
-        logStructured({ event: "reconnecting", reason: "generic_close" });
-        setTimeout(() => startBot(), 5000);
+        // 408 timedOut/connectionLost, 428 connectionClosed, 500 badSession,
+        // 503, or unknown — transient; reconnect with backoff.
+        scheduleReconnect(5000, `generic_close_${statusCode || "unknown"}`);
       }
     }
   });
