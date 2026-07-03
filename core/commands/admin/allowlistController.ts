@@ -5,6 +5,7 @@ import { sendBotReply, safeGetGroupName, safeGetContactName, buildSessionKey } f
 import { normalizeJid } from "../../../security/rbac";
 import { saveSession } from "../../state";
 import { redis } from "../../../storage/redisClient";
+import { botLabel } from "../../../agents/core/botLabels";
 
 // ── LIST GROUPS ──
 registerCommand({
@@ -16,15 +17,9 @@ registerCommand({
       await sendBotReply(ctx.sock, ctx.from, "No groups configured (allowlist is empty).");
     } else {
       const formattedPromises = list.map(async (entry) => {
-        const botLabel =
-          entry.botNumber === 1
-            ? "ECB"
-            : entry.botNumber === 2
-              ? "DKB"
-              : "PARAG";
         const statusLabel = entry.enabled ? "Enabled" : "Disabled";
         const groupName = await safeGetGroupName(ctx.sock, entry.jid);
-        return `${entry.id}. ${groupName} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
+        return `${entry.id}. ${groupName} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel(entry.botNumber)}) | [${statusLabel}]`;
       });
       const formatted = await Promise.all(formattedPromises);
       await sendBotReply(ctx.sock, ctx.from, `Allowed groups:\n${formatted.join("\n")}`);
@@ -42,15 +37,9 @@ registerCommand({
       await sendBotReply(ctx.sock, ctx.from, "No chats configured (allowlist is empty).");
     } else {
       const formattedPromises = list.map(async (entry) => {
-        const botLabel =
-          entry.botNumber === 1
-            ? "ECB"
-            : entry.botNumber === 2
-              ? "DKB"
-              : "PARAG";
         const statusLabel = entry.enabled ? "Enabled" : "Disabled";
         const name = await safeGetContactName(entry.jid);
-        return `${entry.id}. ${name} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel}) | [${statusLabel}]`;
+        return `${entry.id}. ${name} (${entry.jid}) | Bot ${entry.botNumber} (${botLabel(entry.botNumber)}) | [${statusLabel}]`;
       });
       const formatted = await Promise.all(formattedPromises);
       await sendBotReply(ctx.sock, ctx.from, `Allowed chats:\n${formatted.join("\n")}`);
@@ -70,7 +59,7 @@ registerCommand({
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !addgroup <group-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB"
+        "Usage: !addgroup <group-jid> [bot-number]\nBot 0: Generic | Bot 1: ECB | Bot 2: DKB | Bot 3: PARAG"
       );
       return;
     }
@@ -114,7 +103,7 @@ registerCommand({
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !addchat <chat-jid> [bot-number]\nBot 0: PARAG | Bot 1: ECB | Bot 2: DKB"
+        "Usage: !addchat <chat-jid> [bot-number]\nBot 0: Generic | Bot 1: ECB | Bot 2: DKB | Bot 3: PARAG"
       );
       return;
     }
@@ -180,12 +169,10 @@ registerCommand({
       botNumber: groupEntry.botNumber,
     };
 
-    const botLabel = groupEntry.botNumber === 1 ? "ECB" : groupEntry.botNumber === 2 ? "DKB" : "PARAG";
-
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to remove Group ID: ${groupId} | Name: ${groupName} | JID: ${groupEntry.jid} | Bot: ${groupEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
+      `Are you sure you want to remove Group ID: ${groupId} | Name: ${groupName} | JID: ${groupEntry.jid} | Bot: ${groupEntry.botNumber} (${botLabel(groupEntry.botNumber)}) from the allowlist?\n(Enter !YES for confirmation)`
     );
 
     const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
@@ -227,12 +214,11 @@ registerCommand({
     };
 
     const name = await safeGetContactName(chatEntry.jid);
-    const botLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
 
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to remove Chat ID: ${chatId} | Name: ${name} | JID: ${chatEntry.jid} | Bot: ${chatEntry.botNumber} (${botLabel}) from the allowlist?\n(Enter !YES for confirmation)`
+      `Are you sure you want to remove Chat ID: ${chatId} | Name: ${name} | JID: ${chatEntry.jid} | Bot: ${chatEntry.botNumber} (${botLabel(chatEntry.botNumber)}) from the allowlist?\n(Enter !YES for confirmation)`
     );
 
     const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
@@ -278,8 +264,8 @@ registerCommand({
       botNumber: newBotNumber,
     };
 
-    const oldBotLabel = groupEntry.botNumber === 1 ? "ECB" : groupEntry.botNumber === 2 ? "DKB" : "PARAG";
-    const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : "PARAG";
+    const oldBotLabel = botLabel(groupEntry.botNumber);
+    const newBotLabel = botLabel(newBotNumber);
 
     await sendBotReply(
       ctx.sock,
@@ -329,8 +315,8 @@ registerCommand({
     };
 
     const name = await safeGetContactName(chatEntry.jid);
-    const oldBotLabel = chatEntry.botNumber === 1 ? "ECB" : chatEntry.botNumber === 2 ? "DKB" : "PARAG";
-    const newBotLabel = newBotNumber === 1 ? "ECB" : newBotNumber === 2 ? "DKB" : "PARAG";
+    const oldBotLabel = botLabel(chatEntry.botNumber);
+    const newBotLabel = botLabel(newBotNumber);
 
     await sendBotReply(
       ctx.sock,

@@ -136,7 +136,7 @@ export async function handleMessage(
     const topic = parts.slice(1).join(" ").toLowerCase();
 
     let docContent: string | null = null;
-    if (topic.includes("parag") || topic.includes("bot 0")) {
+    if (topic.includes("parag") || topic.includes("bot 3")) {
       docContent = loadDocFile("bot-parag.md");
     } else if (
       topic.includes("dkb") ||

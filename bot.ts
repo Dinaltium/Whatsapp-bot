@@ -503,8 +503,10 @@ async function startBot(): Promise<void> {
       if (!persistentAuthStore) {
         persistentAuthStore = await useNeonAuthState("parag");
         console.log("Using Neon PostgreSQL for auth state storage.");
-        const { ensureSchema } = await import("./storage/db");
+        const { ensureSchema, migrateParagToBot3 } = await import("./storage/db");
         await ensureSchema();
+        // Reassign legacy PARAG (bot 0) rows to bot 3 before allowlists load.
+        await migrateParagToBot3();
       } else {
         console.log("Reusing existing auth store for reconnect.");
       }

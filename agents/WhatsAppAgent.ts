@@ -1,10 +1,17 @@
 import { BotHandler, BotContext, AgentResult } from "./core/BotHandler";
+import GenericAgent from "./GenericAgent";
 import ParagAgent from "./ParagAgent";
 import EmbedclubAgent from "./EmbedclubAgent";
 import DKBAgent from "./DKBAgent";
 
 // SELF bot is NOT in this registry — it is handled separately in messageRouter.ts
-const BOTS_REGISTRY: BotHandler[] = [ParagAgent, EmbedclubAgent, DKBAgent];
+// Bot 0 = Generic (default for unassigned chats), 1 = ECB, 2 = DKB, 3 = PARAG.
+const BOTS_REGISTRY: BotHandler[] = [
+  GenericAgent,
+  EmbedclubAgent,
+  DKBAgent,
+  ParagAgent,
+];
 
 export function getBotRegistry(): BotHandler[] {
   return BOTS_REGISTRY;

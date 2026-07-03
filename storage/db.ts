@@ -298,3 +298,53 @@ export async function ensureSchema(): Promise<void> {
     console.error("Failed to bootstrap database schema:", error);
   }
 }
+
+/**
+ * One-time migration: PARAG moved from bot 0 to bot 3 when the Generic bot took
+ * over the default (bot 0) slot. Existing allowlist rows on bot 0 were all
+ * PARAG (Generic didn't exist before), so reassign them to 3 — otherwise they'd
+ * silently become Generic. Guarded by a marker row so it runs exactly once and
+ * never touches genuinely-Generic rows created afterwards. Must run BEFORE the
+ * allowlists are loaded into memory at startup.
+ */
+export async function migrateParagToBot3(): Promise<void> {
+  const pool = getPool();
+  if (!pool) return;
+  const MARKER = "parag_to_bot3_2026_07";
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wa_schema_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    const done = await pool.query(
+      `SELECT 1 FROM wa_schema_migrations WHERE name = $1 LIMIT 1`,
+      [MARKER],
+    );
+    if (done.rows.length > 0) return;
+
+    await pool.query("BEGIN");
+    const g = await pool.query(
+      `UPDATE wa_allowed_groups SET bot_number = 3 WHERE bot_number = 0`,
+    );
+    const c = await pool.query(
+      `UPDATE wa_allowed_chats SET bot_number = 3 WHERE bot_number = 0`,
+    );
+    await pool.query(
+      `INSERT INTO wa_schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [MARKER],
+    );
+    await pool.query("COMMIT");
+    console.log(
+      `[Migration] parag_to_bot3: reassigned ${g.rowCount ?? 0} group(s) and ${c.rowCount ?? 0} chat(s) from bot 0 to PARAG (bot 3).`,
+    );
+  } catch (error) {
+    try {
+      await pool.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    console.error("[Migration] parag_to_bot3 failed:", error);
+  }
+}
