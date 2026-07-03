@@ -226,7 +226,7 @@ export async function getEventsForMonth(
       return [];
     }
 
-    // Foreground scrape allowed: block until Puppeteer returns events to ensure accuracy
+    // Foreground fetch allowed: block until the dk24 API returns events to ensure accuracy
     console.log(
       `Events database empty/missing cache for ${normalized}. Running foreground calendar scraping...`,
     );

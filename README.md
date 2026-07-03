@@ -1,6 +1,6 @@
 # WhatsApp Bot Coordinator
 
-A TypeScript-based WhatsApp bot coordinator designed for the DK24 and ECB developer networks. It integrates with the Groq AI API (Llama-3.3-70B), Neon PostgreSQL for session persistence, a prompt-injection firewall, and Puppeteer for calendar updates.
+A TypeScript-based WhatsApp bot coordinator designed for the DK24 and ECB developer networks. It integrates with the Groq AI API (Llama-3.3-70B), Neon PostgreSQL for session persistence, a prompt-injection firewall, and the dk24.org public API for calendar, community, and project data.
 
 ## Key Features
 
@@ -15,7 +15,7 @@ A TypeScript-based WhatsApp bot coordinator designed for the DK24 and ECB develo
   - Administration requires sequential primary IDs rather than raw JIDs (e.g. `!rmgroup -id 4` or `!editgroup -id 2 -b 2`).
   - EPHEMERAL-safe storage: Allowlist records are saved entirely in PostgreSQL, avoiding issues with temporary local files on platforms like Render.
 - **Admin Confirmation Prompts:** Deletions, edits, and bot re-assignments require a `!YES` confirmation from the specific administrator who initiated the action.
-- **Background Scrapers:** Puppeteer integration fetches events and community groups from `https://dk24.org`. Uses a serialized execution queue to avoid rate limits or memory issues.
+- **DK24 Data Sync:** Fetches events, communities, and projects from the dk24.org public API (`/api/v1/calendar`, `/api/v1/communities`, `/api/v1/projects`) with 24h Neon-backed caching and in-flight de-duplication.
 - **Security Protections:**
   - **RBAC Firewall:** Standard JIDs and `@lid` identifiers are resolved and checked against `ADMIN_JIDS` values.
   - **LID Resolver:** Resolves WhatsApp Localized Identifiers (`@lid`) to phone JIDs (`@s.whatsapp.net`) using metadata caches and socket update events.
@@ -24,10 +24,10 @@ A TypeScript-based WhatsApp bot coordinator designed for the DK24 and ECB develo
 ## Tech Stack
 
 - **Runtime:** Node.js (v20+) with TypeScript
-- **WhatsApp Client:** `@whiskeysockets/baileys` (v7.0.0-rc11)
+- **WhatsApp Client:** `@whiskeysockets/baileys` (v7.0.0-rc13)
 - **Database client:** Neon PostgreSQL (using pg connection pooling)
 - **AI Completion:** Groq API SDK
-- **Headless Browser:** Puppeteer
+- **DK24 data source:** dk24.org public REST API (native `fetch`)
 
 ## Prerequisites
 
@@ -88,7 +88,7 @@ graph TD
     E -->|Active/Enabled| G{Rate Limiter}
     G -->|Muted/Burst Triggered| H[Mute Bot response]
     G -->|Allowed| I[Bot Prompt Selector]
-    I -->|Bot 2 DKB| J[Puppeteer Scrapers / Mentor DB]
+    I -->|Bot 2 DKB| J[DK24 API Sync / Mentor DB]
     I -->|Bot 0/1| K[Groq AI Completion Engine]
     K -->|Replies via typing state| L[WhatsApp Send Socket]
 ```
@@ -178,11 +178,14 @@ Manage mentor registrations and profiles in the DK24 Directory.
 - `!delmentor -id <id_number>`
   - Removes a mentor record by ID. Prompts with a `!YES` confirmation.
 
-## Background Scrapers
+## DK24 Data Sync
 
-To pull content from `https://dk24.org/calendar` and `https://dk24.org/communities`, the coordinator runs a serialized Puppeteer process:
-- **Serialization Queue:** Scrape tasks are run sequentially using a queue (`serializePuppeteer`) to avoid concurrency issues and memory locks.
-- **Caching:** Scrapes run in the background if cached records are older than 24 hours. The bot runs scrapers in the foreground only if the database cache table is empty.
+Events, communities, and projects are pulled from the dk24.org public REST API
+(`/api/v1/calendar`, `/api/v1/communities`, `/api/v1/projects`) using native
+`fetch` — no browser/scraper involved. The base URL is overridable via
+`DK24_API_BASE_URL`.
+- **In-flight de-duplication:** Concurrent requests for the same resource reuse a single in-flight promise to avoid redundant API hits.
+- **Caching:** Records are cached in Neon; a stale (>24h) cache is served instantly while a background refresh runs. A foreground fetch happens only when the cache table is empty.
 
 ## Render Deployment
 
@@ -195,7 +198,7 @@ This application is ready for deployment on Render.
    - `GROQ_API_KEY`
    - `ADMIN_JIDS`
    - `DATABASE_URL` (Neon PostgreSQL link)
-5. Keep the build and start commands as configured in `render.yaml`. The setup includes setting `PUPPETEER_CACHE_DIR` to ensure Puppeteer binaries persist correctly.
+5. Keep the build and start commands as configured in `render.yaml`.
 
 ## Security Policies
 

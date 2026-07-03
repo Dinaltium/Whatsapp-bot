@@ -34,12 +34,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Puppeteer
+# Build/tool caches
 .cache/
-
-
-# Puppeteer Cache
-.puppeteer_cache/
 
 test.ts
 

@@ -120,20 +120,6 @@
     },
     {
       "type": "library",
-      "name": "puppeteer",
-      "version": "24.43.1",
-      "description": "Headless Chrome Node.js API",
-      "licenses": [
-        {
-          "license": {
-            "id": "Apache-2.0"
-          }
-        }
-      ],
-      "purl": "pkg:npm/puppeteer@24.43.1"
-    },
-    {
-      "type": "library",
       "name": "qrcode-terminal",
       "version": "0.12.0",
       "description": "QRCodes in the terminal",
