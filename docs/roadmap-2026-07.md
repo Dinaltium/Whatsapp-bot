@@ -1,10 +1,51 @@
 # Roadmap — Audit Follow-up (2026-07-03)
 
-Planning-only session. No code changed. This captures every decision made after the
-full security/architecture/bot-design/RAG/ban-risk audit, so the next session (Opus)
-has full context without re-deriving it.
+Planning session captured every decision after the full
+security/architecture/bot-design/RAG/ban-risk audit. The bulk of it was then
+implemented on branch `feature/audit-followup-2026-07` (2026-07-04).
 
 Status legend: **DO FIRST** / Planned / Needs design / Deferred / Blocked-on-info
+
+---
+
+## Implementation status (2026-07-04) — branch `feature/audit-followup-2026-07`
+
+**Shipped (10 commits, typecheck clean, 69 unit tests green):**
+1. Baileys rc11 → rc13 (CVE-2026-48063). ✅ §0
+2. Per-message try/catch in the router loop (no more batch-drop on one throw). ✅ §2.3
+3. Removed dead in-memory session Map + unused BullMQ. ✅ §2.1/2.2
+4. Typing-delay curve for long replies (no flat 20-30s chop). ✅ §5
+5. Global account-level outgoing rate cap (env OUTGOING_GLOBAL_PER_MIN). ✅ §2/§5
+6. Mentor DB-layer pagination (LIMIT/OFFSET + countMentors) + contact-field
+   validation (utils/validators.ts). ✅ §3, §4-pagination
+7. `!!voice -id <n>` destination override via existing getChatEntryById. ✅ §7-voice
+8. RBAC: owner-only guard so role.manage holders can't assign privileged roles;
+   confirmed the createrole dialogue can't mint admin perms (regression test). ✅ §1
+9. Intro-detector redesigned event-driven (group-participants.update →
+   introNotifier → mentor group), LLM auto-classification removed. ✅ §6
+10. Search: Redis result caching (skips recency queries) + source-trust
+    reranking + GROQ_MODEL_SCOUT emergency fallback. ✅ §4-RAG
+
+New env vars: OUTGOING_GLOBAL_PER_MIN, INTRO_NOTIFY_GROUP_JID,
+SEARCH_CACHE_TTL_SEC (all documented in .env.example). `logs.md` gitignored
+(contained Signal session key material — never committed).
+
+**NOT done — deliberately deferred, need live/DB verification (do NOT ship blind):**
+- **Agent Defender integration** (§1). Swaps the working promptFirewall for the
+  external `agent-defender` npm pkg (local copy at
+  `C:\Projects\VoidHackJune26\agent-defender-js`). Can't runtime-verify against
+  Groq here; the current firewall's keyword-bypass was NOT otherwise changed, so
+  that flaw still stands until this lands. Wrap the Groq client with its
+  OpenAI-compatible adapter next.
+- **Generic-bot restructure + shared BotHandler base + DB migration** (§3). Needs
+  a one-time migration reassigning groups currently defaulting to bot 0 (PARAG)
+  onto PARAG's new number BEFORE deploy, or they silently become Generic. Owner
+  said they'll test this live. Ship on its own branch with the migration.
+- **Auth-state encryption hard-fail on missing key** (audit MEDIUM,
+  neonAuthStateStore.ts) — small, but touches auth startup; pair with a live
+  restart test.
+- **`-img` image flag + voice feature polish** (§7) — still blocked on the
+  deferred image-sourcing design (recent-chat-image pool).
 
 ---
 
