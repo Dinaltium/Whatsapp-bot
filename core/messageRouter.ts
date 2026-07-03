@@ -16,7 +16,6 @@ import {
   isHistoricalMessage,
   isDuplicateMessage,
 } from "./middleware/antiReplay";
-import { handleIntroDetection } from "./middleware/introDetector";
 import {
   checkAiRateLimit,
   checkGroupAndGlobalLimits,
@@ -163,12 +162,8 @@ async function processInboundMessage(
       await setLastUserMessage(`${from}:${senderId}`, text);
     }
 
-    // ── INTRO DETECTION (DKB groups only) ──
-    if (text && from.endsWith("@g.us") && msg.message) {
-      if (await handleIntroDetection(sock, msg, from, senderId, text)) {
-        return;
-      }
-    }
+    // Member-intro handling is now event-driven (group-participants.update →
+    // introNotifier), not text-scraped here.
 
     // ── CONTEXT CACHING (for !!context, !!summarize, !!tldr features) ─────
     if (text && !msg.key?.fromMe && senderId) {

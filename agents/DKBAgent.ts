@@ -1,6 +1,5 @@
 import { BotHandler, BotContext, AgentResult } from "./core/BotHandler";
 import { handleMessage } from "./DKB/handler";
-import { classifyAndAutoAddMentor } from "../services/DKB/mentorService";
 import { DKB_HELP_TEXT } from "./DKB/intro";
 
 const DKBAgent: BotHandler = {
@@ -20,5 +19,4 @@ const DKBAgent: BotHandler = {
   getHelpText: () => DKB_HELP_TEXT,
 };
 
-export { classifyAndAutoAddMentor };
 export default DKBAgent;
