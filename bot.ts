@@ -5,6 +5,7 @@ import {
   proto,
 } from "@whiskeysockets/baileys";
 import http from "http";
+import crypto from "crypto";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
@@ -40,6 +41,10 @@ const AI_MAX_SESSION_MESSAGES = 8;
 const OUTGOING_PER_JID_PER_MIN = 5;
 const OUTGOING_GLOBAL_PER_MIN =
   Number(process.env.OUTGOING_GLOBAL_PER_MIN) || 15;
+
+// U+2060 WORD JOINER — a zero-width, non-breaking invisible character used to
+// vary an otherwise-identical broadcast message body (see sendBotReply).
+const WORD_JOINER = String.fromCharCode(0x2060);
 
 let activeSocket: any = null;
 export function getActiveSocket() {
@@ -120,17 +125,45 @@ export async function sendBotReply(
   } catch (err) {}
 
   const trimmedText = String(text || "").trim();
+  let finalText = trimmedText;
+
+  // ── OPTIONAL BROADCAST FINGERPRINT VARIATION ─────────────────────
+  // Off by default: WhatsApp can also read hidden characters as a spam signal,
+  // and identical answers to identical commands are legitimate. When
+  // DEDUP_VARY_BROADCAST=true, append 1-3 invisible word-joiners once the same
+  // body has been sent repeatedly within the hour, to break an identical
+  // multi-recipient fingerprint.
+  if (
+    trimmedText &&
+    (process.env.DEDUP_VARY_BROADCAST || "").toLowerCase() === "true"
+  ) {
+    try {
+      const { redis } = await import("./storage/redisClient");
+      const bodyHash = crypto
+        .createHash("sha1")
+        .update(trimmedText)
+        .digest("hex");
+      const key = `sent_body:${bodyHash}`;
+      const seen = await redis.incr(key);
+      if (seen === 1) await redis.expire(key, 3600);
+      if (seen > 1) {
+        finalText = trimmedText + WORD_JOINER.repeat(((seen - 2) % 3) + 1);
+      }
+    } catch {
+      /* fail open */
+    }
+  }
 
   // ── REDIS-BACKED ECHO DETECTION (Task 3.4) ───────────────────────
   try {
     const { setLastSentMessage } = await import("./core/state");
-    await setLastSentMessage(to, trimmedText);
+    await setLastSentMessage(to, finalText);
   } catch {
     /* non-fatal */
   }
 
   await sock.sendMessage(to, {
-    text: trimmedText,
+    text: finalText,
   });
 }
 
