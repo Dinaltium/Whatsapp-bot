@@ -182,6 +182,21 @@ registerCommand({
       }
     }
 
+    // Owner-only guard: a non-admin acting via the role.manage permission may
+    // assign ordinary roles, but must never assign a role that carries
+    // admin-level permissions (privilege propagation). Only hard-admin passes.
+    if (!isManageAdmin) {
+      const { roleHasPrivilegedPermission } = await import("../../../storage/core/rbacRepository");
+      if (await roleHasPrivilegedPermission(normalizedWork)) {
+        await sendBotReply(
+          ctx.sock,
+          ctx.from,
+          `Unauthorized: only the owner can assign the privileged role "${normalizedWork}".`,
+        );
+        return;
+      }
+    }
+
     const { addManagedRole } = await import("../../../storage/core/rbacRepository");
     const { storeLidPhoneMapping } = await import("../../../storage/core/rbacRepository");
     let resolvedPhoneJid: string | null = null;
