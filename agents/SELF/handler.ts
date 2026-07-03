@@ -24,6 +24,7 @@ import {
   generateVoiceMessage,
 } from "../../utils/voiceMessage";
 import { searchWeb, requiresCurrentInfo } from "../../utils/webSearch";
+import chatConfig from "../../config/chatAllowlist";
 import { redis } from "../../storage/redisClient";
 import { getGroqReply } from "../../ai/groqClient";
 import * as fs from "fs";
@@ -486,14 +487,37 @@ export async function handleMessage(
     };
   }
 
-  // ── !!voice <text> (or reply) ─────────────────────────────────────────
+  // ── !!voice [-id <n>] <text> (or reply) ───────────────────────────────
+  // Optional `-id <n>` routes the voice note to saved chat-allowlist entry n
+  // (same id space as !listchats) instead of the current chat.
   if (cmd.startsWith("voice") && (cmd === "voice" || cmd.startsWith("voice "))) {
+    const voiceArgs = raw.slice("voice".length).trim();
+
+    let destJid = from;
+    let destLabel = "this chat";
+    let spokenArgs = voiceArgs;
+
+    const idMatch = voiceArgs.match(/^-id\s+(\d+)\s*([\s\S]*)$/i);
+    if (idMatch) {
+      const chatId = parseInt(idMatch[1], 10);
+      spokenArgs = idMatch[2].trim();
+      const entry = chatConfig.getChatEntryById(chatId);
+      if (!entry) {
+        return {
+          reply: `No saved chat found with id ${chatId}. Use !listchats to see ids.`,
+          usedAI: false,
+        };
+      }
+      destJid = entry.jid;
+      destLabel = `+${entry.jid.split("@")[0]}`;
+    }
+
     const quotedText = getQuotedText(msg);
-    const textToSpeak = quotedText || raw.slice("voice".length).trim();
+    const textToSpeak = quotedText || spokenArgs;
 
     if (!textToSpeak) {
       return {
-        reply: `Usage: !!voice <text> (or reply to a message)`,
+        reply: `Usage: !!voice [-id <n>] <text> (or reply to a message). Use !listchats for ids.`,
         usedAI: false,
       };
     }
@@ -504,6 +528,8 @@ export async function handleMessage(
       };
     }
 
+    // Daily voice limit is global across all destinations (a single leash),
+    // so routing to different ids can't multiply the cap.
     const limitCheck = await checkVoiceLimit();
     if (!limitCheck.allowed) {
       return {
@@ -522,7 +548,7 @@ export async function handleMessage(
     }
 
     try {
-      await sock.sendMessage(from, {
+      await sock.sendMessage(destJid, {
         audio: result.audioBuffer,
         mimetype: "audio/wav",
         ptt: true,
@@ -534,7 +560,11 @@ export async function handleMessage(
         usedAI: false,
       };
     }
-    return { reply: "", usedAI: false }; // audio already sent
+    // Confirm to the operator when the note went somewhere other than here.
+    return {
+      reply: destJid === from ? "" : `Voice note sent to ${destLabel}.`,
+      usedAI: false,
+    };
   }
 
   // ── !!reply <style> (reply) ───────────────────────────────────────────
