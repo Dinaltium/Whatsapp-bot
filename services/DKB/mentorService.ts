@@ -1,5 +1,6 @@
 import {
   getMentors,
+  countMentors,
   addMentor,
 } from "../../storage/DKB/mentorRepository";
 import { cleanRole } from "../../utils/normalization";
@@ -115,8 +116,9 @@ export async function handleMentorsQuery(
   filter: string | undefined,
   page: number,
 ): Promise<string> {
-  const mentors = await getMentors(filter);
-  if (mentors.length === 0) {
+  const limit = 10;
+  const total = await countMentors(filter);
+  if (total === 0) {
     if (filter) {
       return `No mentors found matching "${filter}".`;
     } else {
@@ -124,15 +126,15 @@ export async function handleMentorsQuery(
     }
   }
 
-  const limit = 10;
-  const total = mentors.length;
   const totalPages = Math.ceil(total / limit);
 
   if (page < 1) page = 1;
   if (page > totalPages) page = totalPages;
 
-  const startIdx = (page - 1) * limit;
-  const pageMentors = mentors.slice(startIdx, startIdx + limit);
+  // Paginate at the DB layer (LIMIT/OFFSET) instead of fetching every mentor
+  // and slicing in memory.
+  const offset = (page - 1) * limit;
+  const pageMentors = await getMentors(filter, limit, offset);
 
   const lines: string[] = [];
   lines.push("Mentors Directory");

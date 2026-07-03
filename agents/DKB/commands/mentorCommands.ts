@@ -22,6 +22,10 @@ import {
   parseMentorFlags,
   handleMentorsQuery,
 } from "../../../services/DKB/mentorService";
+import {
+  validateMentorContactFields,
+  isValidEmail,
+} from "../../../utils/validators";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -384,6 +388,16 @@ export async function handleMentorCommand(
       };
     }
 
+    const contactError = validateMentorContactFields({
+      linkedin,
+      github,
+      instagram,
+      email,
+    });
+    if (contactError) {
+      return { reply: formatBotReply(`Error: ${contactError}`), usedAI: false };
+    }
+
     if (rawPhone) {
       const phoneResult = formatWithCountryCode(rawPhone);
       if (phoneResult.needsCountryCode && phoneResult.rawNumber) {
@@ -489,6 +503,34 @@ export async function handleMentorCommand(
     const mentorId = parseInt(editMatch[1], 10);
     const flag = editMatch[2].toLowerCase();
     const value = editMatch[3].trim();
+
+    // Validate contact-field formats before persisting.
+    const contactFlagField: Record<string, "linkedin" | "github" | "instagram"> =
+      {
+        "-l": "linkedin",
+        "-linkedin": "linkedin",
+        "-g": "github",
+        "-github": "github",
+        "-i": "instagram",
+        "-instagram": "instagram",
+      };
+    if (contactFlagField[flag]) {
+      const err = validateMentorContactFields({
+        [contactFlagField[flag]]: value,
+      });
+      if (err) {
+        return { reply: formatBotReply(`Error: ${err}`), usedAI: false };
+      }
+    }
+    // -e holds email only when the value contains '@' (else it's expertise).
+    if (flag === "-e" && value.includes("@") && !isValidEmail(value)) {
+      return {
+        reply: formatBotReply(
+          `Error: Invalid email "${value}". Expected something like name@example.com.`,
+        ),
+        usedAI: false,
+      };
+    }
 
     const existingMentor = await getMentorById(mentorId);
     if (!existingMentor) {
