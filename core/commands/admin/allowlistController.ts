@@ -140,12 +140,12 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !rmgroup -id <id_number>\nExample: !rmgroup -id 4"
+        "Usage: !rmgroup -gid <group_id>\nExample: !rmgroup -gid 4"
       );
       return;
     }
@@ -186,12 +186,12 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !rmchat -id <id_number>\nExample: !rmchat -id 4"
+        "Usage: !rmchat -cid <chat_id>\nExample: !rmchat -cid 4"
       );
       return;
     }
@@ -232,12 +232,12 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)\s+-b\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)\s+-b\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !editgroup -id <id_number> -b <bot_number>\nExample: !editgroup -id 4 -b 2"
+        "Usage: !editgroup -gid <group_id> -b <bot_number>\nExample: !editgroup -gid 4 -b 2"
       );
       return;
     }
@@ -284,12 +284,12 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)\s+-b\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)\s+-b\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !editchat -id <id_number> -b <bot_number>\nExample: !editchat -id 4 -b 2"
+        "Usage: !editchat -cid <chat_id> -b <bot_number>\nExample: !editchat -cid 4 -b 2"
       );
       return;
     }
@@ -335,9 +335,9 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
     if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !disablegroup -id <id_number>\nExample: !disablegroup -id 4");
+      await sendBotReply(ctx.sock, ctx.from, "Usage: !disablegroup -gid <group_id>\nExample: !disablegroup -gid 4");
       return;
     }
 
@@ -367,9 +367,9 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
     if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !disablechat -id <id_number>\nExample: !disablechat -id 4");
+      await sendBotReply(ctx.sock, ctx.from, "Usage: !disablechat -cid <chat_id>\nExample: !disablechat -cid 4");
       return;
     }
 
@@ -399,9 +399,9 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
     if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !enablegroup -id <id_number>\nExample: !enablegroup -id 4");
+      await sendBotReply(ctx.sock, ctx.from, "Usage: !enablegroup -gid <group_id>\nExample: !enablegroup -gid 4");
       return;
     }
 
@@ -431,9 +431,9 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-id\s+(\d+)$/i);
+    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
     if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !enablechat -id <id_number>\nExample: !enablechat -id 4");
+      await sendBotReply(ctx.sock, ctx.from, "Usage: !enablechat -cid <chat_id>\nExample: !enablechat -cid 4");
       return;
     }
 

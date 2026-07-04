@@ -59,7 +59,7 @@ export const SELF_HELP_TEXT = [
   "• !!tldr [count] — Summarize last N messages (default 20)",
   "• !!tone — Detect emotional tone of replied message",
   "• !!find <keyword> — Search chat history for keyword",
-  "• !!voice [-id <n>] <text> — Voice message here, or to saved chat n (see !listchats)",
+  "• !!voice [-cid n | -gid n] <text> — Voice note here, or to a saved chat/group (see !listchats/!listgroups)",
   "• !!reply <style> — Draft reply in style (formal/casual/decline/agree)",
   "• !!search <query> — Web search with real-time results",
   "• !!<any question> — Ask anything, no domain restriction",

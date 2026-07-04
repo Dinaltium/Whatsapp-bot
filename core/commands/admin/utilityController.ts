@@ -313,9 +313,9 @@ registerCommand({
 });
 
 // ── SET MENTOR-NOTIFY GROUP ──
-// !notify -id <groupId>  → route new-member notices to that allowlisted group
-// !notify off            → disable notices
-// !notify                → show the current target
+// !notify -gid <groupId>  → route new-member notices to that allowlisted group
+// !notify off             → disable notices
+// !notify                 → show the current target
 registerCommand({
   name: "notify",
   requiresAdmin: true,
@@ -331,8 +331,8 @@ registerCommand({
         ctx.sock,
         ctx.from,
         active
-          ? `Member-join notices go to: ${active}${current ? "" : " (from env)"}\n\n!notify -id <groupId> to change · !notify off to disable`
-          : "Member-join notices are OFF.\n\nUse !notify -id <groupId> (see !listgroups) to set the mentor group.",
+          ? `Member-join notices go to: ${active}${current ? "" : " (from env)"}\n\n!notify -gid <groupId> to change · !notify off to disable`
+          : "Member-join notices are OFF.\n\nUse !notify -gid <groupId> (see !listgroups) to set the mentor group.",
       );
       return;
     }
@@ -345,12 +345,12 @@ registerCommand({
     }
 
     // Set by allowlisted group id
-    const match = ctx.cmdArgs.join(" ").match(/^-id\s+(\d+)$/i);
+    const match = ctx.cmdArgs.join(" ").match(/^-(?:gid|id)\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage:\n!notify -id <groupId>  (target group, see !listgroups)\n!notify off  (disable)\n!notify  (show current)",
+        "Usage:\n!notify -gid <groupId>  (target group, see !listgroups)\n!notify off  (disable)\n!notify  (show current)",
       );
       return;
     }

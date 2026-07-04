@@ -26,6 +26,7 @@ import {
 import { searchWeb, requiresCurrentInfo } from "../../utils/webSearch";
 import { parseImageFlag } from "../../utils/imageFlag";
 import chatConfig from "../../config/chatAllowlist";
+import groupConfig from "../../config/groupAllowlist";
 import { redis } from "../../storage/redisClient";
 import { getGroqReply } from "../../ai/groqClient";
 import * as fs from "fs";
@@ -501,33 +502,48 @@ export async function handleMessage(
     let destLabel = "this chat";
     let spokenArgs = voiceArgs;
 
-    const idMatch = voiceArgs.match(/^-id\s+(\d+)\s*([\s\S]*)$/i);
+    // -cid <n> targets a saved chat, -gid <n> a saved group (-id = chat alias).
+    const idMatch = voiceArgs.match(/^-(gid|cid|id)\s+(\d+)\s*([\s\S]*)$/i);
     if (idMatch) {
-      const chatId = parseInt(idMatch[1], 10);
-      spokenArgs = idMatch[2].trim();
-      const entry = chatConfig.getChatEntryById(chatId);
-      if (!entry) {
-        return {
-          reply: `No saved chat found with id ${chatId}. Use !listchats to see ids.`,
-          usedAI: false,
-        };
-      }
-      destJid = entry.jid;
-      // Media to a @lid target is unreliable — resolve to the phone JID first.
-      if (destJid.endsWith("@lid")) {
-        try {
-          const { resolvePhoneJidFromLid } = await import(
-            "../../storage/core/rbacRepository"
-          );
-          const resolved = await resolvePhoneJidFromLid(destJid);
-          if (resolved) destJid = resolved;
-        } catch {
-          /* keep the lid and try anyway */
+      const flag = idMatch[1].toLowerCase();
+      const targetId = parseInt(idMatch[2], 10);
+      spokenArgs = idMatch[3].trim();
+
+      if (flag === "gid") {
+        const entry = groupConfig.getGroupEntryById(targetId);
+        if (!entry) {
+          return {
+            reply: `No saved group found with id ${targetId}. Use !listgroups to see ids.`,
+            usedAI: false,
+          };
         }
+        destJid = entry.jid;
+        destLabel = entry.jid;
+      } else {
+        const entry = chatConfig.getChatEntryById(targetId);
+        if (!entry) {
+          return {
+            reply: `No saved chat found with id ${targetId}. Use !listchats to see ids.`,
+            usedAI: false,
+          };
+        }
+        destJid = entry.jid;
+        // Media to a @lid target is unreliable — resolve to the phone JID first.
+        if (destJid.endsWith("@lid")) {
+          try {
+            const { resolvePhoneJidFromLid } = await import(
+              "../../storage/core/rbacRepository"
+            );
+            const resolved = await resolvePhoneJidFromLid(destJid);
+            if (resolved) destJid = resolved;
+          } catch {
+            /* keep the lid and try anyway */
+          }
+        }
+        destLabel = destJid.endsWith("@s.whatsapp.net")
+          ? `+${destJid.split("@")[0]}`
+          : destJid;
       }
-      destLabel = destJid.endsWith("@s.whatsapp.net")
-        ? `+${destJid.split("@")[0]}`
-        : destJid;
     }
 
     const quotedText = getQuotedText(msg);
@@ -535,7 +551,7 @@ export async function handleMessage(
 
     if (!textToSpeak) {
       return {
-        reply: `Usage: !!voice [-id <n>] <text> (or reply to a message). Use !listchats for ids.`,
+        reply: `Usage: !!voice [-cid <n> | -gid <n>] <text> (or reply). -cid = saved chat, -gid = saved group.`,
         usedAI: false,
       };
     }
