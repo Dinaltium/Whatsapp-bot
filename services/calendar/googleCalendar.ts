@@ -19,7 +19,17 @@ const SCOPES = ["https://www.googleapis.com/auth/calendar"];
 const CAL_TZ = process.env.GOOGLE_CALENDAR_TZ || "Asia/Kolkata";
 
 function getCreds(): { client_email: string; private_key: string } | null {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  // Prefer a key file on disk (easiest on a VPS); fall back to inline JSON.
+  let raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || "";
+  const file = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
+  if (!raw && file) {
+    try {
+      raw = require("fs").readFileSync(file, "utf-8");
+    } catch (err) {
+      console.error(`[Calendar] Cannot read GOOGLE_SERVICE_ACCOUNT_FILE (${file}):`, err);
+      return null;
+    }
+  }
   if (!raw) return null;
   try {
     const json = JSON.parse(raw);
