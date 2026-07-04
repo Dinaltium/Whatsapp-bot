@@ -4,7 +4,11 @@ export interface UserSession {
   domainUnlocked: boolean;
   lastActiveAt: number;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
+  lastQuery?: {
+    type: "mentors" | "clubs" | "events" | "projects";
+    filter?: string;
+    page: number;
+  };
   pendingMentor?: {
     name: string;
     organization: string;

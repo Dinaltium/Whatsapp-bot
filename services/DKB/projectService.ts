@@ -1,28 +1,45 @@
 import { getProjects, Project } from "../../storage/DKB/projectRepository";
+import {
+  paginate,
+  pageFooter,
+  PAGINATION_MAX_VIEW,
+  DirectorySession,
+} from "./pagination";
 
-export async function handleProjectsCommand(): Promise<string> {
+export async function handleProjectsCommand(
+  session?: DirectorySession,
+  page: number = 1,
+): Promise<string> {
   try {
     const projects = await getProjects();
     if (projects.length === 0) {
       return "No projects found in the DK24 directory yet. Please try again later.";
     }
 
+    const { pageItems, page: p, totalPages, total } = paginate(projects, page);
+    if (session) session.lastQuery = { type: "projects", page: p };
+
     const lines: string[] = [];
     lines.push("DK24 Community Projects");
-    lines.push("Projects built by the DK24 developer community:\n");
+    lines.push(`Projects built by the DK24 community (Total: ${total}):\n`);
 
-    projects.forEach((p, idx) => {
-      const cats = p.categories.length ? ` [${p.categories.join(", ")}]` : "";
-      lines.push(`${idx + 1}. *${p.title}*${cats}`);
-      if (p.tags.length) {
-        lines.push(`   Tech: ${p.tags.slice(0, 6).join(", ")}`);
+    const offset = (p - 1) * PAGINATION_MAX_VIEW;
+    pageItems.forEach((proj, idx) => {
+      const cats = proj.categories.length
+        ? ` [${proj.categories.join(", ")}]`
+        : "";
+      lines.push(`${offset + idx + 1}. *${proj.title}*${cats}`);
+      if (proj.tags.length) {
+        lines.push(`   Tech: ${proj.tags.slice(0, 6).join(", ")}`);
       }
     });
 
     lines.push("");
     lines.push(
-      "Tip: Type `!project <name>` (e.g. `!project filetailored`) for full details, contributors, and links.",
+      "Tip: Type `!project <name>` (e.g. `!project filetailored`) for full details.",
     );
+    const footer = pageFooter("projects", p, totalPages);
+    if (footer) lines.push(footer);
 
     return lines.join("\n");
   } catch (error) {

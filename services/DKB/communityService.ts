@@ -1,5 +1,11 @@
 import { getClubs } from "../../storage/DKB/communityRepository";
 import { cleanRole } from "../../utils/normalization";
+import {
+  paginate,
+  pageFooter,
+  PAGINATION_MAX_VIEW,
+  DirectorySession,
+} from "./pagination";
 
 // Specific keywords: match on their own (club/community names, DK24 branding)
 const COMMUNITY_SPECIFIC = [
@@ -78,15 +84,26 @@ export function isCommunityQuery(query: string | null | undefined): boolean {
   return hasContextual && hasAnchor;
 }
 
-export async function handleClubsCommand(): Promise<string> {
+export async function handleClubsCommand(
+  session?: DirectorySession,
+  page: number = 1,
+): Promise<string> {
   try {
     const clubs = await getClubs();
+    if (clubs.length === 0) {
+      return "No official member communities found yet. Please try again later.";
+    }
+
+    const { pageItems, page: p, totalPages, total } = paginate(clubs, page);
+    if (session) session.lastQuery = { type: "clubs", page: p };
+
     const lines: string[] = [];
     lines.push("Welcome to DK24 (Developer Kommunity 24)!");
-    lines.push("Here are our official member communities:\n");
+    lines.push(`Official member communities (Total: ${total}):\n`);
 
-    clubs.forEach((c, idx) => {
-      lines.push(`${idx + 1}. *${c.name}*`);
+    const offset = (p - 1) * PAGINATION_MAX_VIEW;
+    pageItems.forEach((c, idx) => {
+      lines.push(`${offset + idx + 1}. *${c.name}*`);
       lines.push(`   College: ${c.college}`);
       if (c.website && c.website.toLowerCase().startsWith("http")) {
         lines.push(`   Website: ${c.website}`);
@@ -95,8 +112,10 @@ export async function handleClubsCommand(): Promise<string> {
     });
 
     lines.push(
-      "Tip: Type `!club <name>` (e.g. `!club sosc` or `!club sceptix`) to get detailed contact information and representatives for a specific club!",
+      "Tip: Type `!club <name>` (e.g. `!club sosc`) for a club's contacts and reps.",
     );
+    const footer = pageFooter("clubs", p, totalPages);
+    if (footer) lines.push(footer);
 
     return lines.join("\n");
   } catch (error) {

@@ -2,6 +2,7 @@ import {
   getMentors,
   countMentors,
 } from "../../storage/DKB/mentorRepository";
+import { PAGINATION_MAX_VIEW } from "./pagination";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -12,7 +13,7 @@ interface UserSession {
   domainUnlocked: boolean;
   lastActiveAt: number;
   messages: ConversationMessage[];
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
+  lastQuery?: { type: "mentors" | "clubs" | "events" | "projects"; filter?: string; page: number };
   pendingMentor?: {
     name: string;
     organization: string;
@@ -105,7 +106,7 @@ export async function handleMentorsQuery(
   filter: string | undefined,
   page: number,
 ): Promise<string> {
-  const limit = 10;
+  const limit = PAGINATION_MAX_VIEW;
   const total = await countMentors(filter);
   if (total === 0) {
     if (filter) {

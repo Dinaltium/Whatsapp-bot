@@ -36,7 +36,7 @@ interface UserSession {
   domainUnlocked: boolean;
   lastActiveAt: number;
   messages: ConversationMessage[];
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
+  lastQuery?: { type: "mentors" | "clubs" | "events" | "projects"; filter?: string; page: number };
   pendingMentor?: {
     name: string;
     organization: string;
@@ -267,49 +267,8 @@ export async function handleMentorCommand(
     };
   }
 
-  if (lowerPrompt === "next") {
-    popUserMessage(session, userPrompt);
-    if (!session.lastQuery || session.lastQuery.type !== "mentors") {
-      return {
-        reply: formatBotReply(
-          "No active mentor directory query to paginate. Type !mentors to view the directory first.",
-        ),
-        usedAI: false,
-      };
-    }
-    return {
-      reply: formatBotReply(
-        await handleMentorsQuery(
-          session,
-          session.lastQuery.filter,
-          session.lastQuery.page + 1,
-        ),
-      ),
-      usedAI: false,
-    };
-  }
-
-  if (lowerPrompt.startsWith("page")) {
-    popUserMessage(session, userPrompt);
-    if (!session.lastQuery || session.lastQuery.type !== "mentors") {
-      return {
-        reply: formatBotReply(
-          "No active mentor directory query to paginate. Type !mentors to view the directory first.",
-        ),
-        usedAI: false,
-      };
-    }
-    const pageNum = parseInt(trimmed.slice(4).trim(), 10);
-    if (isNaN(pageNum) || pageNum <= 0) {
-      return { reply: formatBotReply("Usage: !page <number>"), usedAI: false };
-    }
-    return {
-      reply: formatBotReply(
-        await handleMentorsQuery(session, session.lastQuery.filter, pageNum),
-      ),
-      usedAI: false,
-    };
-  }
+  // !next / !page are handled centrally in directoryController (registry) so
+  // they paginate whatever directory was last listed, not just mentors.
 
   // ADD MENTOR
   if (lowerPrompt.startsWith("addmentor")) {

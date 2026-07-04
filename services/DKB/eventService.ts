@@ -4,8 +4,13 @@ import {
   searchEventsGlobally,
   Event,
 } from "../../storage/DKB/eventRepository";
+import { paginate, pageFooter, DirectorySession } from "./pagination";
 
-export async function handleEventsCommand(monthArg: string): Promise<string> {
+export async function handleEventsCommand(
+  monthArg: string,
+  session?: DirectorySession,
+  page: number = 1,
+): Promise<string> {
   try {
     const normalized = normalizeMonthYear(monthArg);
     const eventsList = await getEventsForMonth(normalized);
@@ -14,28 +19,33 @@ export async function handleEventsCommand(monthArg: string): Promise<string> {
     lines.push(
       `Developer Kommunity Events Catalog (${normalized.toUpperCase()})`,
     );
-    lines.push(
-      `We track and power awesome developer events! Here is the ${normalized} calendar:\n`,
-    );
 
     if (eventsList.length === 0) {
+      lines.push("");
       lines.push("No events scheduled for this month on the calendar.");
     } else {
-      eventsList.forEach((evt, idx) => {
-        lines.push(`${evt.title}*`);
+      const { pageItems, page: p, totalPages } = paginate(eventsList, page);
+      if (session) {
+        session.lastQuery = { type: "events", filter: normalized, page: p };
+      }
+      lines.push(`Calendar for ${normalized} (Total: ${eventsList.length}):\n`);
+      pageItems.forEach((evt) => {
+        lines.push(`*${evt.title}*`);
         if (evt.host) lines.push(`   • Host: ${evt.host}`);
         if (evt.date) lines.push(`   • Date: ${evt.date}`);
         if (evt.location) lines.push(`   • Location: ${evt.location}`);
         if (evt.stage) lines.push(`   • Current Stage: ${evt.stage}`);
         lines.push("");
       });
+      const footer = pageFooter("events", p, totalPages);
+      if (footer) lines.push(footer);
     }
 
     lines.push(
-      `Tip: Type \`!event <name>\` (e.g. \`!event hackfest\`) to get full details of a specific event!`,
+      `Tip: Type \`!event <name>\` (e.g. \`!event hackfest\`) for full details.`,
     );
     lines.push(
-      `Tip: You can view other months by typing \`!events <monthYear>\` (e.g. \`!events may-2026\` or \`!events jun26\`).`,
+      `Tip: View other months with \`!events <monthYear>\` (e.g. \`!events may-2026\`).`,
     );
 
     return lines.join("\n");
