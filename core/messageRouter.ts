@@ -602,6 +602,7 @@ async function processInboundMessage(
         "findgroups",
         "neonping",
         "neonconnect",
+        "notify",
         "manage",
         "createrole",
         "role",

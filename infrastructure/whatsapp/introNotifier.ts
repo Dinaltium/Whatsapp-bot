@@ -21,12 +21,25 @@ import { getJidHash, logStructured } from "../../utils/logger";
  * disabled) when INTRO_NOTIFY_GROUP_JID is unset or the source group is the
  * mentor group itself.
  */
+export const INTRO_NOTIFY_SETTING_KEY = "intro_notify_group_jid";
+
 export async function notifyMentorGroupOfNewMember(
   sock: any,
   sourceGroupJid: string,
   addedJid: string,
 ): Promise<void> {
-  const notifyGroup = normalizeJid(process.env.INTRO_NOTIFY_GROUP_JID || "");
+  // Prefer the in-bot setting (set via !notify) over the env fallback, so the
+  // target can be changed at runtime without a redeploy.
+  let configured = "";
+  try {
+    const { getSetting } = await import("../../storage/core/settingsRepository");
+    configured = (await getSetting(INTRO_NOTIFY_SETTING_KEY)) || "";
+  } catch {
+    /* fall back to env */
+  }
+  if (!configured) configured = process.env.INTRO_NOTIFY_GROUP_JID || "";
+
+  const notifyGroup = normalizeJid(configured);
   if (!notifyGroup || !notifyGroup.endsWith("@g.us")) return; // disabled
   if (notifyGroup === sourceGroupJid) return; // avoid self-notification
 

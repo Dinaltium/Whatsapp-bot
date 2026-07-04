@@ -357,6 +357,7 @@ export async function shouldSkipMessage(
     "findgroups",
     "neonping",
     "neonconnect",
+    "notify",
     "reveal",
     // NOTE: "manage" is NOT here — it has its own RBAC gate inside the handler
     // that allows both admins AND users with the role.manage permission.
