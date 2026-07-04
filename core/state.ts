@@ -41,11 +41,6 @@ export interface UserSession {
     jid: string;
     botNumber: number;
   };
-  pendingCreateRole?: {
-    roleName: string;
-    step: "select_permissions";
-    tries: number;
-  };
   pendingDelete?: {
     mentorId: number;
     name: string;
