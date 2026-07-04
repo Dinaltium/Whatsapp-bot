@@ -2,6 +2,7 @@ import {
   getMentors,
   countMentors,
 } from "../../storage/DKB/mentorRepository";
+import { PAGINATION_MAX_VIEW } from "./pagination";
 
 interface ConversationMessage {
   role: "user" | "assistant";
@@ -12,7 +13,7 @@ interface UserSession {
   domainUnlocked: boolean;
   lastActiveAt: number;
   messages: ConversationMessage[];
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
+  lastQuery?: { type: "mentors" | "clubs" | "events" | "projects"; filter?: string; page: number };
   pendingMentor?: {
     name: string;
     organization: string;
@@ -33,7 +34,8 @@ interface UserSession {
 
 export function parseMentorFlags(text: string): Record<string, string> {
   const flags: Record<string, string> = {};
-  const regex = /(?:\s|^)(-[a-zA-Z]+)(?=\s|$)/g;
+  // `-@` (email) is included alongside letter flags; no more @-detection.
+  const regex = /(?:\s|^)(-[@a-zA-Z]+)(?=\s|$)/g;
   const tokens: { flag: string; index: number; length: number }[] = [];
   let match;
   while ((match = regex.exec(text)) !== null) {
@@ -50,12 +52,15 @@ export function parseMentorFlags(text: string): Record<string, string> {
     const valEnd = next ? next.index : text.length;
     const value = text.substring(valStart, valEnd).trim();
 
-    if (current.flag === "-e") {
-      if (value.includes("@")) {
-        flags["-email"] = value;
-      } else {
-        flags["-expertise"] = value;
-      }
+    // Normalise to canonical keys: -@ = email, -e/-ex/-s = expertise.
+    if (current.flag === "-@") {
+      flags["-email"] = value;
+    } else if (
+      current.flag === "-e" ||
+      current.flag === "-ex" ||
+      current.flag === "-s"
+    ) {
+      flags["-expertise"] = value;
     } else {
       flags[current.flag] = value;
     }
@@ -101,7 +106,7 @@ export async function handleMentorsQuery(
   filter: string | undefined,
   page: number,
 ): Promise<string> {
-  const limit = 10;
+  const limit = PAGINATION_MAX_VIEW;
   const total = await countMentors(filter);
   if (total === 0) {
     if (filter) {

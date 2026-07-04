@@ -26,10 +26,6 @@ import {
   checkGlobalUserLimit,
 } from "../security/rateLimiter";
 import {
-  handleCreateCommand,
-  handleRoleDialogue,
-} from "../services/core/rbacService";
-import {
   getSession,
   saveSession,
   getLastUserMessage,
@@ -267,21 +263,6 @@ async function processInboundMessage(
     const session = await getSession(sessionKey);
 
     // resetSessionIfExpired is handled by Redis TTL
-
-    // ── INTERCEPT ROLE CREATION/MODIFICATION DIALOGUE ───────────────────
-    if (session.pendingCreateRole) {
-      const handled = await handleRoleDialogue(
-        text!,
-        session,
-        async (replyText) => {
-          await sendBotReply(sock, from || "", replyText);
-        },
-      );
-      if (handled) {
-        await saveSession(sessionKey, session);
-        return;
-      }
-    }
 
     // ── INTERCEPT ALLOWLIST CONFIRMATIONS ────────────────────────────────
     if (session.pendingDeleteGroup) {
@@ -604,8 +585,6 @@ async function processInboundMessage(
         "neonconnect",
         "notify",
         "manage",
-        "createrole",
-        "role",
         "reveal",
         "clubs",
         "club",
@@ -619,6 +598,7 @@ async function processInboundMessage(
         "page",
         "addmentor",
         "editmentor",
+        "rmmentor",
         "delmentor",
       ];
       let isStaticCommand = staticCommands.includes(cmdName);

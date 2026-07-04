@@ -36,7 +36,7 @@ interface UserSession {
   domainUnlocked: boolean;
   lastActiveAt: number;
   messages: ConversationMessage[];
-  lastQuery?: { type: "mentors"; filter?: string; page: number };
+  lastQuery?: { type: "mentors" | "clubs" | "events" | "projects"; filter?: string; page: number };
   pendingMentor?: {
     name: string;
     organization: string;
@@ -267,49 +267,8 @@ export async function handleMentorCommand(
     };
   }
 
-  if (lowerPrompt === "next") {
-    popUserMessage(session, userPrompt);
-    if (!session.lastQuery || session.lastQuery.type !== "mentors") {
-      return {
-        reply: formatBotReply(
-          "No active mentor directory query to paginate. Type !mentors to view the directory first.",
-        ),
-        usedAI: false,
-      };
-    }
-    return {
-      reply: formatBotReply(
-        await handleMentorsQuery(
-          session,
-          session.lastQuery.filter,
-          session.lastQuery.page + 1,
-        ),
-      ),
-      usedAI: false,
-    };
-  }
-
-  if (lowerPrompt.startsWith("page")) {
-    popUserMessage(session, userPrompt);
-    if (!session.lastQuery || session.lastQuery.type !== "mentors") {
-      return {
-        reply: formatBotReply(
-          "No active mentor directory query to paginate. Type !mentors to view the directory first.",
-        ),
-        usedAI: false,
-      };
-    }
-    const pageNum = parseInt(trimmed.slice(4).trim(), 10);
-    if (isNaN(pageNum) || pageNum <= 0) {
-      return { reply: formatBotReply("Usage: !page <number>"), usedAI: false };
-    }
-    return {
-      reply: formatBotReply(
-        await handleMentorsQuery(session, session.lastQuery.filter, pageNum),
-      ),
-      usedAI: false,
-    };
-  }
+  // !next / !page are handled centrally in directoryController (registry) so
+  // they paginate whatever directory was last listed, not just mentors.
 
   // ADD MENTOR
   if (lowerPrompt.startsWith("addmentor")) {
@@ -339,11 +298,11 @@ export async function handleMentorCommand(
             "",
             "Optional flags:",
             "  -d  Description",
-            "  -ex Expertise",
+            "  -e  Expertise (alias: -ex)",
             "  -l  LinkedIn URL",
             "  -i  Instagram handle/URL",
             "  -g  GitHub handle/URL",
-            "  -e  Email (value must contain @)",
+            "  -@  Email",
             "  -p  Phone number",
             "",
             "Flags can be on separate lines. Example:",
@@ -362,9 +321,7 @@ export async function handleMentorCommand(
     const name = (flags["-n"] || "").trim();
     const organization = (flags["-o"] || "").trim();
     const description = (flags["-d"] || "").trim() || undefined;
-    const expertise =
-      (flags["-ex"] || flags["-expertise"] || flags["-s"] || "").trim() ||
-      undefined;
+    const expertise = (flags["-expertise"] || "").trim() || undefined;
     const linkedin = (flags["-l"] || "").trim() || undefined;
     const instagram = (flags["-i"] || "").trim() || undefined;
     const github = (flags["-g"] || "").trim() || undefined;
@@ -479,7 +436,7 @@ export async function handleMentorCommand(
     }
 
     const argsRaw = trimmed.slice(10).trim();
-    const editMatch = argsRaw.match(/^-id\s+(\d+)\s+(-[a-zA-Z]+)\s+([\s\S]+)$/i);
+    const editMatch = argsRaw.match(/^-id\s+(\d+)\s+(-[@a-zA-Z]+)\s+([\s\S]+)$/i);
     if (!editMatch) {
       return {
         reply: formatBotReply(
@@ -492,8 +449,8 @@ export async function handleMentorCommand(
             "  !editmentor -id 3 -p +91 9902849280",
             "  !editmentor -id 3 -l https://linkedin.com/in/rafan",
             "",
-            "Flags: -n (name), -d (description), -o (org), -ex (expertise),",
-            "       -l (linkedin), -i (instagram), -g (github), -e (email), -p (phone)",
+            "Flags: -n (name), -d (description), -o (org), -e (expertise),",
+            "       -l (linkedin), -i (instagram), -g (github), -@ (email), -p (phone)",
           ].join("\n"),
         ),
         usedAI: false,
@@ -522,8 +479,8 @@ export async function handleMentorCommand(
         return { reply: formatBotReply(`Error: ${err}`), usedAI: false };
       }
     }
-    // -e holds email only when the value contains '@' (else it's expertise).
-    if (flag === "-e" && value.includes("@") && !isValidEmail(value)) {
+    // -@ is email; validate it. (-e is expertise, free text.)
+    if (flag === "-@" && !isValidEmail(value)) {
       return {
         reply: formatBotReply(
           `Error: Invalid email "${value}". Expected something like name@example.com.`,
@@ -584,8 +541,8 @@ export async function handleMentorCommand(
     };
   }
 
-  // DELETE MENTOR
-  if (lowerPrompt.startsWith("delmentor")) {
+  // DELETE MENTOR (rmmentor; delmentor kept as a backward-compatible alias)
+  if (lowerPrompt.startsWith("rmmentor") || lowerPrompt.startsWith("delmentor")) {
     popUserMessage(session, userPrompt);
     const isAuthorized =
       isAdmin ||
@@ -599,12 +556,13 @@ export async function handleMentorCommand(
       };
     }
 
-    const argsRaw = trimmed.slice(9).trim();
+    const cmdWord = lowerPrompt.startsWith("rmmentor") ? "rmmentor" : "delmentor";
+    const argsRaw = trimmed.slice(cmdWord.length).trim();
     const delMatch = argsRaw.match(/^-id\s+(\d+)$/i);
     if (!delMatch) {
       return {
         reply: formatBotReply(
-          "Usage: !delmentor -id <id_number>\nExample: !delmentor -id 4",
+          "Usage: !rmmentor -id <id_number>\nExample: !rmmentor -id 4",
         ),
         usedAI: false,
       };

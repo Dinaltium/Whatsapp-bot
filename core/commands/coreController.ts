@@ -67,24 +67,52 @@ registerCommand({
 });
 
 // ── HELP COMMAND (dynamic — Task 4.6) ──
+const CORE_HELP_TEXT = [
+  "DK24 Bot — Help",
+  "",
+  "Core (everyone, any chat):",
+  "• !help — this help",
+  "• !help -id <0-3> — a specific bot's commands (0 Generic · 1 ECB · 2 DKB · 3 PARAG)",
+  "• !help me — admin/self (!!) commands",
+  "• !ping — check the bot is online",
+  "• !whoami — show your WhatsApp id",
+  "• !getjid — show this chat's id",
+  "• !reset — clear your AI conversation context",
+  "",
+  "Directory (DKB chats): !clubs · !events · !projects · !mentors (with !next / !page <n>)",
+  "Admin-only commands manage the allowlist, mentor role, reminders, and utilities.",
+].join("\n");
+
 registerCommand({
   name: "help",
   handler: async (ctx) => {
-    let botNumber = 0;
-    if (ctx.from?.endsWith("@g.us")) {
-      const groupBot = groupConfig.getGroupBot(ctx.from);
-      botNumber = groupBot?.botNumber || 0;
-    } else {
-      const chatBot = chatConfig.getChatBot(ctx.from);
-      botNumber = chatBot?.botNumber || 0;
+    const arg = (ctx.cmdArgs[0] || "").toLowerCase();
+
+    // !help me → admin/self command list
+    if (arg === "me") {
+      const { SELF_HELP_TEXT } = await import("../../agents/SELF/intro");
+      await sendBotReply(ctx.sock, ctx.from, SELF_HELP_TEXT);
+      return;
     }
 
     const { getBotRegistry } = await import("../../agents/WhatsAppAgent");
-    const bot = getBotRegistry().find((b) => b.botId === botNumber);
-    const helpText = bot
-      ? bot.getHelpText()
-      : "Bot not configured for this chat. Contact an admin.";
 
-    await sendBotReply(ctx.sock, ctx.from, helpText);
+    // !help -id <n> → that bot's commands
+    const idMatch = ctx.cmdArgs.join(" ").match(/^-id\s+(\d+)$/i);
+    if (idMatch) {
+      const botId = parseInt(idMatch[1], 10);
+      const bot = getBotRegistry().find((b) => b.botId === botId);
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        bot
+          ? bot.getHelpText()
+          : `No bot with id ${botId}. Try !help -id 0/1/2/3.`,
+      );
+      return;
+    }
+
+    // !help → core commands
+    await sendBotReply(ctx.sock, ctx.from, CORE_HELP_TEXT);
   },
 });

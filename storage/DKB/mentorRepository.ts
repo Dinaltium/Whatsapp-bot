@@ -198,6 +198,7 @@ export async function updateMentorField(
     o: "organization",
     org: "organization",
     organization: "organization",
+    e: "expertise",
     ex: "expertise",
     s: "expertise",
     expertise: "expertise",
@@ -207,17 +208,15 @@ export async function updateMentorField(
     instagram: "instagram",
     g: "github",
     github: "github",
+    "@": "email",
+    email: "email",
     p: "phone",
     phone: "phone",
   };
 
-  let columnName = fieldMapping[flag.toLowerCase().replace(/^-+/, "")];
+  const columnName = fieldMapping[flag.toLowerCase().replace(/^-+/, "")];
   if (!columnName) {
-    if (flag.toLowerCase().replace(/^-+/, "") === "e") {
-      columnName = value && value.includes("@") ? "email" : "expertise";
-    } else {
-      return false;
-    }
+    return false;
   }
 
   try {
