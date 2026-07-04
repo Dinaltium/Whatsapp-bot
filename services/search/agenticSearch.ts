@@ -1,29 +1,25 @@
 /**
- * Agentic search: a bounded Groq tool-calling loop.
+ * Agentic search: a bounded Groq tool-calling loop over a GENERAL, provider-
+ * agnostic toolset — no per-domain APIs. The model rewrites the query (by
+ * choosing the search terms), reads fused multi-provider results plus the FULL
+ * text of the top page, can read another page or search again if unsatisfied,
+ * then answers grounded + cited, or ABSTAINS. Works for any topic: sports,
+ * anime, games, recipes, tech, whatever.
  *
- * Instead of always dumping web-search text into the prompt (which lets the
- * model confabulate live scores), we hand the model a set of TOOLS and let it
- * plan: pick a live-data API for scores/prices, fall back to web search for
- * news, extract a URL, refine, then answer — or ABSTAIN if the tools didn't
- * return the fact. Only tools whose providers are configured are offered.
+ * Tools:
+ *   web_search(query) — Exa + Tavily + Firecrawl fan-out, RRF-fused, and the
+ *                       top result's full page auto-read in for grounding.
+ *   read_page(url)    — deep-read a specific URL's full text.
  *
- * Returns null on hard failure so the caller can fall back to the legacy
- * single-shot search path.
+ * Returns null on hard failure so callers fall back to the legacy path.
  */
-import { classifyIntent } from "./intentRouter";
-import {
-  getCricketScore,
-  getFootballScore,
-  isCricketConfigured,
-  isFootballConfigured,
-} from "./providers/sports";
-import { getStockQuote, getCryptoPrice, isStockConfigured } from "./providers/finance";
 import { searchWeb as searchWebService } from "./searchService";
 import { buildSearchContext } from "./contextBuilder";
+import { deepRead } from "./providers/reader";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MAX_ROUNDS = 4;
-const TOOL_RESULT_CAP = 3500; // chars per tool result fed back to the model
+const TOOL_RESULT_CAP = 6000; // chars per tool result fed back to the model
 
 export interface AgenticAnswer {
   answer: string;
@@ -39,28 +35,28 @@ export interface AgenticOptions {
   /** Base system prompt (persona + current date). Tool/abstain rules appended. */
   baseSystemPrompt: string;
   history?: { role: "user" | "assistant"; content: string }[];
-  /** Allow the model to fetch a reference image (only for explicit -img). */
+  /** Allow returning a reference image the search surfaced (only for -img). */
   wantImage?: boolean;
 }
 
-const ABSTAIN_RULES = [
+const TOOL_RULES = [
   "",
-  "TOOL USE RULES:",
-  "- You have tools for live data. Use get_cricket_score / get_football_score for match scores, get_stock_quote / get_crypto_price for prices, web_search for news/facts, extract_url for a specific link.",
-  "- Prefer a dedicated live-data tool over web_search for scores and prices.",
+  "SEARCH RULES:",
+  "- Use web_search for anything you don't reliably know or that could have changed (news, scores, releases, prices, facts). Choose sharp search terms; add the year/date when recency matters.",
+  "- web_search returns fused results from multiple engines plus the full text of the top page. If that isn't enough, call read_page on the most relevant URL, or search again with better terms.",
   "- Ground every fact in tool output. NEVER invent scores, prices, names, dates, or numbers.",
-  "- If the tools do not return the requested fact, say plainly that you couldn't fetch it right now — do not guess or fill it in from memory.",
-  "- When you have enough, answer concisely and state the time/date the data is from.",
+  "- If the tools don't contain the answer, say plainly you couldn't find it right now — do not guess or fill from memory.",
+  "- Answer concisely. State the date/source the data is from. At most one short caveat.",
 ].join("\n");
 
-function toolSpecs(available: Set<string>): any[] {
-  const all: Record<string, any> = {
-    web_search: {
+function toolSpecs(): any[] {
+  return [
+    {
       type: "function",
       function: {
         name: "web_search",
         description:
-          "Search the live web for news, facts, or recent info. Returns sourced snippets with published dates.",
+          "Search the live web (multiple engines fused) for news, facts, or recent info. Returns sourced snippets with dates plus the full text of the top result.",
         parameters: {
           type: "object",
           properties: {
@@ -70,11 +66,11 @@ function toolSpecs(available: Set<string>): any[] {
         },
       },
     },
-    extract_url: {
+    {
       type: "function",
       function: {
-        name: "extract_url",
-        description: "Fetch and read the contents of a specific URL.",
+        name: "read_page",
+        description: "Fetch and read the full text of a specific URL.",
         parameters: {
           type: "object",
           properties: {
@@ -84,86 +80,16 @@ function toolSpecs(available: Set<string>): any[] {
         },
       },
     },
-    get_cricket_score: {
-      type: "function",
-      function: {
-        name: "get_cricket_score",
-        description:
-          "Get current/live cricket match scores. Optionally filter by team or series name.",
-        parameters: {
-          type: "object",
-          properties: {
-            team: { type: "string", description: "Team or series filter (optional)." },
-          },
-        },
-      },
-    },
-    get_football_score: {
-      type: "function",
-      function: {
-        name: "get_football_score",
-        description:
-          "Get live football (soccer) match scores. Optionally filter by team or league.",
-        parameters: {
-          type: "object",
-          properties: {
-            team: { type: "string", description: "Team or league filter (optional)." },
-          },
-        },
-      },
-    },
-    get_stock_quote: {
-      type: "function",
-      function: {
-        name: "get_stock_quote",
-        description: "Get the current quote for a stock ticker symbol (e.g. AAPL).",
-        parameters: {
-          type: "object",
-          properties: {
-            symbol: { type: "string", description: "Ticker symbol." },
-          },
-          required: ["symbol"],
-        },
-      },
-    },
-    get_crypto_price: {
-      type: "function",
-      function: {
-        name: "get_crypto_price",
-        description:
-          "Get the current price and 24h change for a cryptocurrency (e.g. bitcoin, ethereum).",
-        parameters: {
-          type: "object",
-          properties: {
-            coin: {
-              type: "string",
-              description: "Coin id or name, e.g. bitcoin, ethereum, solana.",
-            },
-          },
-          required: ["coin"],
-        },
-      },
-    },
-  };
-  return [...available].map((n) => all[n]).filter(Boolean);
+  ];
 }
 
-/** Which tools are usable, given configured providers + web search availability. */
-function availableTools(): Set<string> {
-  const s = new Set<string>();
-  if (process.env.TAVILY_API_KEY || process.env.FIRECRAWL_API_KEY) {
-    s.add("web_search");
-    s.add("extract_url");
-  }
-  if (isCricketConfigured()) s.add("get_cricket_score");
-  if (isFootballConfigured()) s.add("get_football_score");
-  if (isStockConfigured()) s.add("get_stock_quote");
-  s.add("get_crypto_price"); // CoinGecko is keyless
-  return s;
-}
-
+/** True when at least one search backend is configured. */
 export function isAgenticAvailable(): boolean {
-  return availableTools().size > 0;
+  return !!(
+    process.env.TAVILY_API_KEY ||
+    process.env.FIRECRAWL_API_KEY ||
+    process.env.EXA_API_KEY
+  );
 }
 
 function clip(s: string): string {
@@ -173,38 +99,38 @@ function clip(s: string): string {
 export async function agenticAnswer(
   opts: AgenticOptions,
 ): Promise<AgenticAnswer | null> {
-  const available = availableTools();
-  if (available.size === 0) return null;
+  if (!isAgenticAvailable()) return null;
 
   const usedTools: string[] = [];
   const citations: string[] = [];
   let imageUrl: string | undefined;
 
-  // Run one tool call, returning a string result for the model.
   async function runTool(name: string, args: any): Promise<string> {
     usedTools.push(name);
     try {
-      if (name === "web_search" || name === "extract_url") {
-        const q = String(args?.query || args?.url || opts.query);
+      if (name === "web_search") {
+        const q = String(args?.query || opts.query);
         const resp = await searchWebService(q);
         for (const r of resp.results || []) if (r.url) citations.push(r.url);
         if (!imageUrl && Array.isArray(resp.images) && resp.images[0]) {
           imageUrl = resp.images[0];
         }
         if (!resp.results?.length && !resp.answer) return "No results found.";
-        return clip(buildSearchContext(resp, 5));
+
+        let ctx = buildSearchContext(resp, 5);
+        // Auto-read the top result's full page — the accuracy multiplier.
+        const topUrl = resp.results?.[0]?.url;
+        if (topUrl) {
+          const full = await deepRead(topUrl);
+          if (full) ctx += `\n\n[Full text of top result — ${topUrl}]\n${full}`;
+        }
+        return clip(ctx);
       }
-      if (name === "get_cricket_score") {
-        return (await getCricketScore(args?.team)) ?? "Cricket data unavailable.";
-      }
-      if (name === "get_football_score") {
-        return (await getFootballScore(args?.team)) ?? "Football data unavailable.";
-      }
-      if (name === "get_stock_quote") {
-        return (await getStockQuote(String(args?.symbol || ""))) ?? "Stock data unavailable.";
-      }
-      if (name === "get_crypto_price") {
-        return (await getCryptoPrice(String(args?.coin || ""))) ?? "Crypto data unavailable.";
+      if (name === "read_page") {
+        const url = String(args?.url || "");
+        if (url) citations.push(url);
+        const full = await deepRead(url);
+        return full ? clip(`[Full text — ${url}]\n${full}`) : "Could not read that page.";
       }
       return `Unknown tool: ${name}`;
     } catch (err) {
@@ -212,25 +138,12 @@ export async function agenticAnswer(
     }
   }
 
-  // Nudge the model toward the right first tool for obvious verticals.
-  const intent = classifyIntent(opts.query);
-  const nudge =
-    intent.vertical === "cricket" && available.has("get_cricket_score")
-      ? "\nThis looks like a live cricket query — start with get_cricket_score."
-      : intent.vertical === "football" && available.has("get_football_score")
-        ? "\nThis looks like a live football query — start with get_football_score."
-        : intent.vertical === "crypto"
-          ? "\nThis looks like a crypto price query — start with get_crypto_price."
-          : intent.vertical === "stock" && available.has("get_stock_quote")
-            ? "\nThis looks like a stock price query — start with get_stock_quote."
-            : "";
-
   const messages: any[] = [
-    { role: "system", content: opts.baseSystemPrompt + ABSTAIN_RULES + nudge },
+    { role: "system", content: opts.baseSystemPrompt + TOOL_RULES },
     ...(opts.history || []).slice(-6),
     { role: "user", content: opts.query },
   ];
-  const tools = toolSpecs(available);
+  const tools = toolSpecs();
 
   async function callGroq(forceNoTools: boolean): Promise<any> {
     const f = (globalThis as any).fetch ?? (await import("node-fetch")).default;
@@ -270,11 +183,7 @@ export async function agenticAnswer(
             /* leave empty on malformed args */
           }
           const result = await runTool(tc.function?.name || "", parsed);
-          messages.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: result,
-          });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: result });
         }
         continue;
       }

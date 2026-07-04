@@ -15,15 +15,6 @@ export interface SearchResponse {
   images?: string[];
 }
 
-// Patterns that indicate URL-based or document extraction needs (use Firecrawl)
-const FIRECRAWL_PATTERNS = [
-  /https?:\/\//i,
-  /summarize\s+(this\s+)?(website|page|url|link|article)/i,
-  /read\s+this\s+(page|url|link|article)/i,
-  /extract\s+(content|text|info)/i,
-  /documentation\s+analysis/i,
-];
-
 // Patterns that indicate current info needs (use Tavily)
 export const CURRENT_INFO_PATTERNS = [
   /\bcurrent\b/i,
@@ -82,17 +73,56 @@ export function searchCacheKey(query: string): string {
   return `websearch:${crypto.createHash("sha1").update(norm).digest("hex")}`;
 }
 
-function preferFirecrawl(prompt: string): boolean {
-  return FIRECRAWL_PATTERNS.some((p) => p.test(prompt));
+// (Provider selection is now a parallel fan-out; no per-query engine routing.)
+
+/** Canonical URL key for dedup (drops protocol, www, trailing slash). */
+function urlKey(url: string | undefined): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return (u.hostname.replace(/^www\./, "") + u.pathname.replace(/\/$/, "")).toLowerCase();
+  } catch {
+    return url.toLowerCase();
+  }
 }
 
+/**
+ * Reciprocal Rank Fusion: merge ranked lists from multiple engines so a result
+ * ranked well by SEVERAL providers rises to the top. Keyless — no reranker API.
+ * Keeps the richest content variant when a URL appears in more than one list.
+ */
+export function rrfMerge(lists: SearchResult[][], k = 60): SearchResult[] {
+  const acc = new Map<string, { r: SearchResult; s: number }>();
+  for (const list of lists) {
+    list.forEach((r, i) => {
+      const key = urlKey(r.url);
+      if (!key) return;
+      const add = 1 / (k + i + 1);
+      const prev = acc.get(key);
+      if (prev) {
+        prev.s += add;
+        if ((r.content?.length || 0) > (prev.r.content?.length || 0)) prev.r = r;
+      } else {
+        acc.set(key, { r, s: add });
+      }
+    });
+  }
+  return [...acc.values()]
+    .sort((a, b) => b.s - a.s)
+    .map((x) => ({ ...x.r, score: x.s }));
+}
+
+/**
+ * Multi-provider fan-out search. Fires Exa + Tavily + Firecrawl in PARALLEL,
+ * fuses their rankings with RRF, dedups, and reranks by domain trust + query
+ * overlap. The union of independent indexes beats any one engine, and no result
+ * depends on a single provider being up. A single-URL query is an extraction.
+ */
 export async function searchWeb(query: string): Promise<SearchResponse> {
   const empty: SearchResponse = { provider: "tavily", results: [] };
 
   const needsLiveData = RECENCY_SENSITIVE_PATTERNS.some((p) => p.test(query));
   const urlMatch = query.match(/https?:\/\/\S+/i);
-  // Recency-sensitive or single-URL extraction requests are always fetched
-  // live; everything else is cacheable.
   const cacheable = !needsLiveData && !urlMatch;
   const cacheKey = searchCacheKey(query);
 
@@ -110,56 +140,56 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
   }
 
   try {
-    const { rerankResults } = await import("./reranker");
-
-    let result: SearchResponse | null = null;
-
+    // A single-URL request is an extraction, not a search.
     if (urlMatch) {
       const { extractWithFirecrawl } = await import("./providers/firecrawl");
-      result = await extractWithFirecrawl(urlMatch[0]);
-    } else if (needsLiveData) {
-      // Live/recent info (scores, "latest", news) — use Tavily's news topic
-      // with a short recency window so results are same-week, not stale pages.
-      console.info(`[SearchService] Recency-sensitive query — using Tavily news topic.`);
-      const { searchWithTavily } = await import("./providers/tavily");
-      result = await searchWithTavily(query, {
-        news: true,
-        days: 3,
-        includeImages: true,
-      });
-      if (!result || !result.results || result.results.length === 0) {
-        console.info(`[SearchService] Tavily news empty, falling back to general Tavily.`);
-        result = await searchWithTavily(query, { includeImages: true });
-      }
-    } else if (preferFirecrawl(query)) {
-      console.info(`[SearchService] Extraction query — using Firecrawl.`);
-      const { searchWithFirecrawl } = await import("./providers/firecrawl");
-      result = await searchWithFirecrawl(query);
-      if (!result || !result.results || result.results.length === 0) {
-        const { searchWithTavily } = await import("./providers/tavily");
-        result = await searchWithTavily(query, { includeImages: true });
-      }
-    } else {
-      console.info(`[SearchService] Using Tavily for general knowledge search.`);
-      const { searchWithTavily } = await import("./providers/tavily");
-      result = await searchWithTavily(query, { includeImages: true });
-      if (!result || !result.results || result.results.length === 0) {
-        console.info(`[SearchService] Tavily returned no results, falling back to Firecrawl.`);
-        const { searchWithFirecrawl } = await import("./providers/firecrawl");
-        result = await searchWithFirecrawl(query);
-      }
+      const extracted = await extractWithFirecrawl(urlMatch[0]);
+      if (extracted && extracted.results.length) return extracted;
     }
-    
-    if (result && result.results && result.results.length > 0) {
-      result.results = rerankResults(query, result.results);
+
+    const { searchWithTavily } = await import("./providers/tavily");
+    const { searchWithExa } = await import("./providers/exa");
+    const { searchWithFirecrawl } = await import("./providers/firecrawl");
+    const { rerankResults } = await import("./reranker");
+    const days = needsLiveData ? 4 : undefined;
+
+    // Fan out — each provider is independent; a failure just yields null.
+    const [tav, exa, fc] = await Promise.all([
+      searchWithTavily(query, {
+        news: needsLiveData,
+        days,
+        includeImages: true,
+      }).catch(() => null),
+      searchWithExa(query, { days }).catch(() => null),
+      searchWithFirecrawl(query).catch(() => null),
+    ]);
+
+    const lists = [tav?.results, exa?.results, fc?.results].filter(
+      (l): l is SearchResult[] => Array.isArray(l) && l.length > 0,
+    );
+    const providersHit = [
+      tav?.results?.length ? "tavily" : null,
+      exa?.results?.length ? "exa" : null,
+      fc?.results?.length ? "firecrawl" : null,
+    ].filter(Boolean);
+    console.info(`[SearchService] fan-out hit: [${providersHit.join(", ") || "none"}]`);
+
+    const fused = rrfMerge(lists);
+    const reranked = rerankResults(query, fused).slice(0, 8);
+    const answer = tav?.answer;
+    const images = tav?.images;
+
+    if (reranked.length || answer) {
+      const result: SearchResponse = {
+        provider: "tavily",
+        answer,
+        results: reranked,
+        images,
+      };
       if (cacheable) {
         try {
           const { redis } = await import("../../storage/redisClient");
-          await redis.setex(
-            cacheKey,
-            SEARCH_CACHE_TTL_SEC,
-            JSON.stringify(result),
-          );
+          await redis.setex(cacheKey, SEARCH_CACHE_TTL_SEC, JSON.stringify(result));
         } catch {
           /* fail open — caching is best-effort */
         }
