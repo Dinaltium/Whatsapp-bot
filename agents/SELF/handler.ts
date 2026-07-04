@@ -612,6 +612,90 @@ export async function handleMessage(
     };
   }
 
+  // ── !!gcal — Google Calendar event ────────────────────────────────────
+  // !!gcal -t <title> -sd <start> [-ed <end>] [-d <desc>]  (create)
+  // !!gcal list                                            (next events)
+  if (cmd === "gcal" || cmd.startsWith("gcal ")) {
+    const {
+      isCalendarConfigured,
+      createCalendarEvent,
+      listUpcomingEvents,
+      parseWhen,
+      addHours,
+    } = await import("../../services/calendar/googleCalendar");
+
+    if (!isCalendarConfigured()) {
+      return {
+        reply:
+          "Google Calendar is not configured. Set GOOGLE_SERVICE_ACCOUNT_JSON and GOOGLE_CALENDAR_ID (see services/calendar/googleCalendar.ts).",
+        usedAI: false,
+      };
+    }
+
+    const gcalArgs = raw.slice("gcal".length).trim();
+
+    if (gcalArgs.toLowerCase() === "list") {
+      const res = await listUpcomingEvents(10);
+      if (!res.ok) {
+        return { reply: `Failed to list events: ${res.error}`, usedAI: false };
+      }
+      if (!res.events || res.events.length === 0) {
+        return { reply: "No upcoming events on the calendar.", usedAI: false };
+      }
+      const lines = res.events.map(
+        (e, i) => `${i + 1}. ${e.summary} — ${e.start}`,
+      );
+      return { reply: `Upcoming events:\n${lines.join("\n")}`, usedAI: false };
+    }
+
+    // Parse -t / -sd / -ed / -d flags.
+    const flags: Record<string, string> = {};
+    const re = /(?:\s|^)(-sd|-ed|-t|-d)(?=\s|$)/g;
+    const toks: { flag: string; index: number; len: number }[] = [];
+    let mm;
+    while ((mm = re.exec(gcalArgs)) !== null) {
+      toks.push({ flag: mm[1], index: mm.index, len: mm[0].length });
+    }
+    for (let i = 0; i < toks.length; i++) {
+      const cur = toks[i];
+      const nxt = toks[i + 1];
+      flags[cur.flag] = gcalArgs
+        .substring(cur.index + cur.len, nxt ? nxt.index : gcalArgs.length)
+        .trim();
+    }
+
+    const title = (flags["-t"] || "").trim();
+    const start = parseWhen(flags["-sd"] || "");
+    if (!title || !start) {
+      return {
+        reply:
+          "Usage: !!gcal -t <title> -sd <YYYY-MM-DD [HH:MM]> [-ed <YYYY-MM-DD [HH:MM]>] [-d <description>]\nExample: !!gcal -t Team sync -sd 2026-07-10 15:00\nAlso: !!gcal list",
+        usedAI: false,
+      };
+    }
+    const end = flags["-ed"] ? parseWhen(flags["-ed"]) : addHours(start, 1);
+    if (!end) {
+      return {
+        reply: `Invalid end date "${flags["-ed"]}". Use YYYY-MM-DD or YYYY-MM-DD HH:MM.`,
+        usedAI: false,
+      };
+    }
+
+    const created = await createCalendarEvent({
+      summary: title,
+      startDateTime: start,
+      endDateTime: end,
+      description: flags["-d"] || undefined,
+    });
+    if (created.ok) {
+      return {
+        reply: `Event created: "${title}"\n${start} → ${end}${created.htmlLink ? `\n${created.htmlLink}` : ""}`,
+        usedAI: false,
+      };
+    }
+    return { reply: `Failed to create event: ${created.error}`, usedAI: false };
+  }
+
   // ── !!reply <style> (reply) ───────────────────────────────────────────
   if (cmd.startsWith("reply ")) {
     const style = raw.slice("reply ".length).trim().toLowerCase();
