@@ -124,6 +124,12 @@ export async function ensureSchema(): Promise<void> {
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS bot_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS dk24_cache_log (
         key TEXT PRIMARY KEY,
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()

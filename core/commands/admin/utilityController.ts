@@ -4,6 +4,13 @@ import { isAdminAction } from "../../../security/rbac";
 import { normalizeJid } from "../../../security/rbac";
 import { redis } from "../../../storage/redisClient";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import groupConfig from "../../../config/groupAllowlist";
+import {
+  getSetting,
+  setSetting,
+  deleteSetting,
+} from "../../../storage/core/settingsRepository";
+import { INTRO_NOTIFY_SETTING_KEY } from "../../../infrastructure/whatsapp/introNotifier";
 
 // ── UTILITY: UNWRAP EPHEMERAL MESSAGES ──
 function unwrapMessage(message: any): any {
@@ -303,4 +310,69 @@ registerCommand({
       await sendBotReply(ctx.sock, ctx.from, `❌ Failed to set contact name:\n${msg}`);
     }
   }
+});
+
+// ── SET MENTOR-NOTIFY GROUP ──
+// !notify -id <groupId>  → route new-member notices to that allowlisted group
+// !notify off            → disable notices
+// !notify                → show the current target
+registerCommand({
+  name: "notify",
+  requiresAdmin: true,
+  handler: async (ctx) => {
+    const arg1 = (ctx.cmdArgs[0] || "").toLowerCase();
+
+    // Show current target
+    if (!arg1) {
+      const current = await getSetting(INTRO_NOTIFY_SETTING_KEY);
+      const envFallback = process.env.INTRO_NOTIFY_GROUP_JID || "";
+      const active = current || envFallback;
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        active
+          ? `Member-join notices go to: ${active}${current ? "" : " (from env)"}\n\n!notify -id <groupId> to change · !notify off to disable`
+          : "Member-join notices are OFF.\n\nUse !notify -id <groupId> (see !listgroups) to set the mentor group.",
+      );
+      return;
+    }
+
+    // Disable
+    if (arg1 === "off" || arg1 === "-off") {
+      await deleteSetting(INTRO_NOTIFY_SETTING_KEY);
+      await sendBotReply(ctx.sock, ctx.from, "Member-join notices disabled.");
+      return;
+    }
+
+    // Set by allowlisted group id
+    const match = ctx.cmdArgs.join(" ").match(/^-id\s+(\d+)$/i);
+    if (!match) {
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        "Usage:\n!notify -id <groupId>  (target group, see !listgroups)\n!notify off  (disable)\n!notify  (show current)",
+      );
+      return;
+    }
+
+    const groupId = parseInt(match[1], 10);
+    const entry = groupConfig.getGroupEntryById(groupId);
+    if (!entry) {
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        `No group found in the allowlist with ID ${groupId}. Use !listgroups to see ids.`,
+      );
+      return;
+    }
+
+    const ok = await setSetting(INTRO_NOTIFY_SETTING_KEY, entry.jid);
+    await sendBotReply(
+      ctx.sock,
+      ctx.from,
+      ok
+        ? `Member-join notices will now go to Group ID ${groupId} (${entry.jid}).`
+        : "Failed to save the setting. Check the database connection.",
+    );
+  },
 });
