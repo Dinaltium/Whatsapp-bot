@@ -66,44 +66,95 @@ registerCommand({
   },
 });
 
-// ── HELP COMMAND (dynamic — Task 4.6) ──
-const CORE_HELP_TEXT = [
-  "DK24 Bot — Help",
-  "",
-  "Core (everyone, any chat):",
-  "• !help — this help",
-  "• !help -id <0-3> — a specific bot's commands (0 Generic · 1 ECB · 2 DKB · 3 PARAG)",
-  "• !!help — admin/self (!!) commands",
-  "• !ping — check the bot is online",
-  "• !whoami — show your WhatsApp id",
-  "• !getjid — show this chat's id",
-  "• !reset — clear your AI conversation context",
-  "",
-  "Directory (DKB chats): !clubs · !events · !projects · !mentors (with !next / !page <n>)",
-  "Admin-only commands manage the allowlist, mentor role, reminders, and utilities.",
-].join("\n");
-
+// ── HELP COMMAND ──
+// Owner (admin): unrestricted, any chat, may point at any bot with `!help -id`.
+// Group/chat member (non-admin): scoped to THIS chat's bot (no bot number),
+//   rate-limited per chat + per bot (see helpService.checkHelpGate), and
+//   role-gated (mentors additionally see the mentor command block).
 registerCommand({
   name: "help",
   handler: async (ctx) => {
+    const { isAdminAction } = await import("../../security/rbac");
     const { getBotRegistry } = await import("../../agents/WhatsAppAgent");
+    const { buildHelpText, checkHelpGate } = await import("./helpService");
 
-    // !help -id <n> → that bot's commands
+    const isAdmin = isAdminAction(ctx.msg, ctx.senderId);
+
+    // Resolve the bot assigned to THIS chat (group or DM); default Generic (0).
+    let botNumber = 0;
+    if (ctx.from?.endsWith("@g.us")) {
+      botNumber = groupConfig.getGroupBot(ctx.from)?.botNumber ?? 0;
+    } else {
+      botNumber = chatConfig.getChatBot(ctx.from)?.botNumber ?? 0;
+    }
+
     const idMatch = ctx.cmdArgs.join(" ").match(/^-id\s+(\d+)$/i);
-    if (idMatch) {
-      const botId = parseInt(idMatch[1], 10);
-      const bot = getBotRegistry().find((b) => b.botId === botId);
+
+    // ── Owner: unrestricted, `-id` points at any bot ──
+    if (isAdmin) {
+      if (idMatch) {
+        const target = parseInt(idMatch[1], 10);
+        const bot = getBotRegistry().find((b) => b.botId === target);
+        if (!bot) {
+          await sendBotReply(
+            ctx.sock,
+            ctx.from,
+            `No bot with id ${target}. Try !help -id 0/1/2/3.`,
+          );
+          return;
+        }
+        await sendBotReply(
+          ctx.sock,
+          ctx.from,
+          buildHelpText(target, { isMentor: true }),
+        );
+        return;
+      }
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        bot
-          ? bot.getHelpText()
-          : `No bot with id ${botId}. Try !help -id 0/1/2/3.`,
+        buildHelpText(botNumber, { isMentor: true }) +
+          "\n\nAdmin: !help -id <0-3> for any bot · !!help for personal (!!) commands",
       );
       return;
     }
 
-    // !help → core commands
-    await sendBotReply(ctx.sock, ctx.from, CORE_HELP_TEXT);
+    // ── Non-admin: scoped to this chat's bot, no `-id`, rate-limited ──
+    if (idMatch) {
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        "Just send !help — it shows the commands for this chat's bot.",
+      );
+      return;
+    }
+
+    const gate = await checkHelpGate(botNumber, ctx.from);
+    if (!gate.allowed) {
+      const msg =
+        gate.reason === "busy"
+          ? `Help was just shown for this bot in other chats. Try again in ~${gate.waitMin} min.`
+          : `Help was already shown here recently. Try again in ~${gate.waitMin} min.`;
+      await sendBotReply(ctx.sock, ctx.from, msg);
+      return;
+    }
+
+    let isMentor = false;
+    if (ctx.senderId) {
+      try {
+        const { userHasPermission } = await import(
+          "../../storage/core/rbacRepository"
+        );
+        isMentor = await userHasPermission(ctx.senderId, "mentor.manage");
+      } catch {
+        /* treat as non-mentor on lookup failure */
+      }
+    }
+
+    await sendBotReply(
+      ctx.sock,
+      ctx.from,
+      buildHelpText(botNumber, { isMentor }),
+    );
   },
 });
