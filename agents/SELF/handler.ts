@@ -513,7 +513,21 @@ export async function handleMessage(
         };
       }
       destJid = entry.jid;
-      destLabel = `+${entry.jid.split("@")[0]}`;
+      // Media to a @lid target is unreliable — resolve to the phone JID first.
+      if (destJid.endsWith("@lid")) {
+        try {
+          const { resolvePhoneJidFromLid } = await import(
+            "../../storage/core/rbacRepository"
+          );
+          const resolved = await resolvePhoneJidFromLid(destJid);
+          if (resolved) destJid = resolved;
+        } catch {
+          /* keep the lid and try anyway */
+        }
+      }
+      destLabel = destJid.endsWith("@s.whatsapp.net")
+        ? `+${destJid.split("@")[0]}`
+        : destJid;
     }
 
     const quotedText = getQuotedText(msg);
@@ -554,7 +568,7 @@ export async function handleMessage(
     try {
       await sock.sendMessage(destJid, {
         audio: result.audioBuffer,
-        mimetype: "audio/wav",
+        mimetype: result.mimetype || "audio/ogg; codecs=opus",
         ptt: true,
       });
     } catch (err) {
