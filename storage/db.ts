@@ -19,18 +19,43 @@ export function getPool(): Pool | null {
   // silently keep strict verification on (a common Supabase/Neon foot-gun).
   const sslDisabled =
     (process.env.DATABASE_SSL || "").trim().toLowerCase() === "false";
-  const rejectUnauthorized =
-    (process.env.DB_SSL_REJECT_UNAUTHORIZED || "").trim().toLowerCase() !==
-    "false";
+
+  // Managed Postgres (Supabase/Neon) presents a private CA that Node won't
+  // verify by default → "self-signed certificate in certificate chain". When
+  // the flag isn't explicitly set, auto-relax verification for those hosts so
+  // the bot connects out of the box (still TLS-encrypted). An explicit
+  // DB_SSL_REJECT_UNAUTHORIZED always wins.
+  const explicitFlag = (process.env.DB_SSL_REJECT_UNAUTHORIZED || "").trim().toLowerCase();
+  let host = "";
+  try {
+    host = new URL(dbUrl).hostname.toLowerCase();
+  } catch {
+    /* leave host empty */
+  }
+  const isManagedHost =
+    /(^|\.)supabase\.(co|com)$|(^|\.)neon\.tech$/.test(host);
+
+  let rejectUnauthorized: boolean;
+  let reason: string;
+  if (explicitFlag === "false") {
+    rejectUnauthorized = false;
+    reason = "explicit DB_SSL_REJECT_UNAUTHORIZED=false";
+  } else if (explicitFlag === "true") {
+    rejectUnauthorized = true;
+    reason = "explicit DB_SSL_REJECT_UNAUTHORIZED=true";
+  } else if (isManagedHost) {
+    rejectUnauthorized = false;
+    reason = `auto-relaxed for managed host (${host})`;
+  } else {
+    rejectUnauthorized = true;
+    reason = "default strict";
+  }
 
   if (sslDisabled) {
     console.log("[db] SSL disabled (DATABASE_SSL=false).");
   } else {
     console.log(
-      `[db] SSL on, rejectUnauthorized=${rejectUnauthorized}.` +
-        (rejectUnauthorized
-          ? " If this is Supabase/Neon and you see a self-signed cert error, set DB_SSL_REJECT_UNAUTHORIZED=false."
-          : ""),
+      `[db] SSL on, rejectUnauthorized=${rejectUnauthorized} (${reason}).`,
     );
   }
 
