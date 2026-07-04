@@ -13,6 +13,7 @@ export function buildSearchContext(response: SearchResponse, maxResults = 5): st
     lines.push(`\n[Result ${i + 1}]`);
     lines.push(`Title: ${r.title}`);
     lines.push(`URL: ${r.url}`);
+    if (r.publishedDate) lines.push(`Published: ${r.publishedDate}`);
     lines.push(`Content: ${r.content.slice(0, 600)}`);
   });
 

@@ -37,6 +37,17 @@ const GROQ_MODEL_SCOUT =
   "meta-llama/llama-4-scout-17b-16e-instruct";
 const GROQ_MODEL_DEFAULT = "llama-3.3-70b-versatile";
 
+// Guidance appended when answering from live web results (web-RAG synthesis).
+const WEB_RAG_INSTRUCTIONS = [
+  "You are answering from the web search results below. Follow these rules:",
+  "- Lead with the direct answer/key fact in the first sentence.",
+  "- Judge recency against the current date above; prefer the newest sources (see each result's Published date).",
+  "- If the answer has a date/time (a match result, a release, an event), state it explicitly.",
+  "- If the data isn't truly up-to-the-second (e.g. a live score), say what time/date the info is from instead of claiming it's live — do NOT invent a live figure.",
+  "- Be concise. At most one short caveat; no long disclaimers or lists of other sites to check.",
+  "- If the results genuinely don't answer the question, say so plainly.",
+].join("\n");
+
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 function nowIST(): Date {
@@ -657,7 +668,7 @@ export async function handleMessage(
         usedAI: false,
       };
     }
-    const systemWithSearch = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nWeb search results:\n${searchContext}`;
+    const systemWithSearch = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n${WEB_RAG_INSTRUCTIONS}\n\nWeb search results:\n${searchContext}`;
     const aiReply = await getGroqReply(
       [{ role: "user", content: query }],
       groqApiKey,
@@ -695,7 +706,7 @@ export async function handleMessage(
 
     if (searchContext) {
       console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
-      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nReal-time web search results:\n${searchContext}`;
+      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n${WEB_RAG_INSTRUCTIONS}\n\nReal-time web search results:\n${searchContext}`;
       modelToUse = GROQ_MODEL_SCOUT;
     } else {
       console.warn(`[SELF] Web search was triggered but returned no results.`);
