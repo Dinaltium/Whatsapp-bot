@@ -15,6 +15,25 @@ export function getPool(): Pool | null {
     return null;
   }
 
+  // Tolerant env parsing — casing/whitespace on the SSL flags shouldn't
+  // silently keep strict verification on (a common Supabase/Neon foot-gun).
+  const sslDisabled =
+    (process.env.DATABASE_SSL || "").trim().toLowerCase() === "false";
+  const rejectUnauthorized =
+    (process.env.DB_SSL_REJECT_UNAUTHORIZED || "").trim().toLowerCase() !==
+    "false";
+
+  if (sslDisabled) {
+    console.log("[db] SSL disabled (DATABASE_SSL=false).");
+  } else {
+    console.log(
+      `[db] SSL on, rejectUnauthorized=${rejectUnauthorized}.` +
+        (rejectUnauthorized
+          ? " If this is Supabase/Neon and you see a self-signed cert error, set DB_SSL_REJECT_UNAUTHORIZED=false."
+          : ""),
+    );
+  }
+
   try {
     dbPool = new Pool({
       connectionString: dbUrl,
@@ -25,13 +44,7 @@ export function getPool(): Pool | null {
       max: Number(process.env.DB_POOL_MAX || 10),
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
-      ssl:
-        process.env.DATABASE_SSL === "false"
-          ? false
-          : {
-              rejectUnauthorized:
-                process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
-            },
+      ssl: sslDisabled ? false : { rejectUnauthorized },
     });
 
     dbPool.on("error", (err) => {
