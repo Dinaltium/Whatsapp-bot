@@ -188,18 +188,22 @@ Events, communities, and projects are pulled from the dk24.org public REST API
 - **In-flight de-duplication:** Concurrent requests for the same resource reuse a single in-flight promise to avoid redundant API hits.
 - **Caching:** Records are cached in Neon; a stale (>24h) cache is served instantly while a background refresh runs. A foreground fetch happens only when the cache table is empty.
 
-## Render Deployment
+## Deployment (VPS)
 
-This application is ready for deployment on Render.
+Runs on a plain VPS (Docker or a Node process manager).
 
-1. Push your changes to your GitHub repository.
-2. In Render, select **New +** -> **Blueprint**.
-3. Select this repository; Render will configure services using `render.yaml`.
-4. Provide the following values when prompted:
-   - `GROQ_API_KEY`
-   - `ADMIN_JIDS`
-   - `DATABASE_URL` (Neon PostgreSQL link)
-5. Keep the build and start commands as configured in `render.yaml`.
+1. Pull the latest code on the server: `git pull`.
+2. Ensure the environment is configured (a `.env` file or exported vars). At
+   minimum: `GROQ_API_KEY`, `ADMIN_JIDS`, `DATABASE_URL` (Neon), `REDIS_URL`,
+   and **`AUTH_STATE_KEY`** — the bot fails to start without an auth-state
+   encryption key unless `ALLOW_UNENCRYPTED_AUTH_STATE=true`. See
+   `.env.example` for the full list.
+3. Build and start:
+   - **Docker:** `docker build -t whatsapp-bot . && docker run --env-file .env whatsapp-bot`
+   - **Direct:** `npm install && npm run build && npm start` (keep it alive with
+     pm2/systemd).
+4. Schema and the one-time bot-number migration apply automatically on boot via
+   `ensureSchema` / `migrateParagToBot3`.
 
 ## Security Policies
 
