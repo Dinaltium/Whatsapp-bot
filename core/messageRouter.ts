@@ -619,6 +619,7 @@ async function processInboundMessage(
         "page",
         "addmentor",
         "editmentor",
+        "rmmentor",
         "delmentor",
       ];
       let isStaticCommand = staticCommands.includes(cmdName);
