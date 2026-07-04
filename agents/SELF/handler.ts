@@ -138,12 +138,8 @@ export async function handleMessage(
     return { reply: SELF_HELP_TEXT, usedAI: false };
   }
 
-  // ── !!explain / !!howdoes / !!commands ───────────────────────────────
-  if (
-    cmd.startsWith("explain ") ||
-    cmd.startsWith("howdoes ") ||
-    cmd.startsWith("commands ")
-  ) {
+  // ── !!explain / !!howdoes ─────────────────────────────────────────────
+  if (cmd.startsWith("explain ") || cmd.startsWith("howdoes ")) {
     const parts = raw.split(/\s+/);
     const topic = parts.slice(1).join(" ").toLowerCase();
 

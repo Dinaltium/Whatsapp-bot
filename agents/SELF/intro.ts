@@ -48,7 +48,6 @@ export const SELF_HELP_TEXT = [
   "• !!help — Show this help",
   "• !!explain <topic> — Explain bot features using docs",
   "• !!howdoes <thing> — How does X work",
-  "• !!commands <botname> — List bot commands (parag/dkb/ecb)",
   "• !!remind <time> <message> — Set a reminder (e.g. !!remind in 5 minutes call John)",
   "• !!reminders — List pending reminders",
   "• !!delremind <id> — Delete a reminder by ID",

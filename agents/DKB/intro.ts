@@ -19,8 +19,11 @@ export const DK24_SYSTEM_PROMPT = [
 export const DKB_HELP_TEXT = [
   "DKB - DK24 (Developer Kommunity 24) Assistant",
   "Available Commands:",
+  "\u2022 !help - Show this help",
   "\u2022 !ping - Check bot response and status",
   "\u2022 !hello - Check bot availability",
+  "\u2022 !whoami - Show your WhatsApp id",
+  "\u2022 !getjid - Show this chat's id",
   "\u2022 !reset - Reset your conversation context",
   "\u2022 !clubs - List all official member communities in the DK24 network",
   "\u2022 !club <name> - Get detailed spotlight card for a specific member community",
@@ -32,8 +35,15 @@ export const DKB_HELP_TEXT = [
   "\u2022 !mentor -id <id> - View full details for a specific mentor by ID",
   "\u2022 !mentor -f <letter_or_query> [page] - Filter mentors by name",
   "\u2022 !next / !page <number> - Paginate the last directory listing (clubs/events/projects/mentors)",
-  "\u2022 !addmentor -n <name> -o <org> [-e expertise] [-@ email] [...] - Add a mentor (Authorized only)",
-  "\u2022 !editmentor -id <id> -<flag> <value> - Update a mentor field (Authorized only)",
-  "\u2022 !rmmentor -id <id> - Remove a mentor (Authorized only)",
   "\u2022 !<question> - Chat directly with DKB (e.g. !What is a good way to host an AI meetup?)",
+].join("\n");
+
+// Mentor-only commands, appended to the DKB help by helpService.buildHelpText()
+// for mentors/owner. Non-mentors see a locked note instead. Kept separate so
+// the base help stays clean and the gate stays in one place.
+export const DKB_MENTOR_HELP_TEXT = [
+  "Mentor commands (mentor role required):",
+  "\u2022 !addmentor -n <name> -o <org> [-e <expertise>] [-@ <email>] [...] - Add a mentor",
+  "\u2022 !editmentor -id <id> -<flag> <value> - Update a mentor field",
+  "\u2022 !rmmentor -id <id> - Remove a mentor",
 ].join("\n");
