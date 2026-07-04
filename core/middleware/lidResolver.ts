@@ -14,6 +14,25 @@
 import { normalizeJid, getSenderId } from "../../security/rbac";
 import { getJidHash, logStructured } from "../../utils/logger";
 
+// Throttle repeated "unresolved LID" logging: a chatty member whose LID can't
+// be mapped would otherwise log on every single message. Log at most once per
+// LID per hour.
+const LID_LOG_THROTTLE_MS = 60 * 60 * 1000;
+const lastUnresolvedLog = new Map<string, number>();
+function shouldLogUnresolved(rawLid: string): boolean {
+  const now = Date.now();
+  const last = lastUnresolvedLog.get(rawLid) || 0;
+  if (now - last < LID_LOG_THROTTLE_MS) return false;
+  lastUnresolvedLog.set(rawLid, now);
+  // Bound the map so it can't grow unbounded over a long uptime.
+  if (lastUnresolvedLog.size > 1000) {
+    for (const [k, t] of lastUnresolvedLog) {
+      if (now - t > LID_LOG_THROTTLE_MS) lastUnresolvedLog.delete(k);
+    }
+  }
+  return true;
+}
+
 /**
  * Resolves a sender identity, extracting alternate JID mappings and
  * falling back through multiple LID resolution strategies.
@@ -139,18 +158,13 @@ export async function resolveSenderId(
             }
           }
 
-          if (!lidResolved) {
+          if (!lidResolved && shouldLogUnresolved(rawLid)) {
             logStructured({
               event: "lid_resolution_failed",
               rawLid,
               rawLidHash: getJidHash(rawLid),
               groupHash: getJidHash(from),
               participantCount: metadata.participants.length,
-              sampleLids: metadata.participants.slice(0, 5).map((p: any) => ({
-                id: p.id ?? null,
-                lid: p.lid ?? null,
-                phoneNumber: p.phoneNumber ?? null,
-              })),
             });
           }
         }
@@ -159,7 +173,7 @@ export async function resolveSenderId(
       }
     }
 
-    if (!lidResolved) {
+    if (!lidResolved && shouldLogUnresolved(rawLid)) {
       logStructured({ event: "lid_unresolved", rawLid, groupHash: getJidHash(from) });
     }
   }

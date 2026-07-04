@@ -37,6 +37,17 @@ const GROQ_MODEL_SCOUT =
   "meta-llama/llama-4-scout-17b-16e-instruct";
 const GROQ_MODEL_DEFAULT = "llama-3.3-70b-versatile";
 
+// Guidance appended when answering from live web results (web-RAG synthesis).
+const WEB_RAG_INSTRUCTIONS = [
+  "You are answering from the web search results below. Follow these rules:",
+  "- Lead with the direct answer/key fact in the first sentence.",
+  "- Judge recency against the current date above; prefer the newest sources (see each result's Published date).",
+  "- If the answer has a date/time (a match result, a release, an event), state it explicitly.",
+  "- If the data isn't truly up-to-the-second (e.g. a live score), say what time/date the info is from instead of claiming it's live — do NOT invent a live figure.",
+  "- Be concise. At most one short caveat; no long disclaimers or lists of other sites to check.",
+  "- If the results genuinely don't answer the question, say so plainly.",
+].join("\n");
+
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 function nowIST(): Date {
@@ -502,8 +513,8 @@ export async function handleMessage(
     let destLabel = "this chat";
     let spokenArgs = voiceArgs;
 
-    // -cid <n> targets a saved chat, -gid <n> a saved group (-id = chat alias).
-    const idMatch = voiceArgs.match(/^-(gid|cid|id)\s+(\d+)\s*([\s\S]*)$/i);
+    // -cid <n> targets a saved chat, -gid <n> a saved group.
+    const idMatch = voiceArgs.match(/^-(gid|cid)\s+(\d+)\s*([\s\S]*)$/i);
     if (idMatch) {
       const flag = idMatch[1].toLowerCase();
       const targetId = parseInt(idMatch[2], 10);
@@ -601,6 +612,90 @@ export async function handleMessage(
     };
   }
 
+  // ── !!gcal — Google Calendar event ────────────────────────────────────
+  // !!gcal -t <title> -sd <start> [-ed <end>] [-d <desc>]  (create)
+  // !!gcal list                                            (next events)
+  if (cmd === "gcal" || cmd.startsWith("gcal ")) {
+    const {
+      isCalendarConfigured,
+      createCalendarEvent,
+      listUpcomingEvents,
+      parseWhen,
+      addHours,
+    } = await import("../../services/calendar/googleCalendar");
+
+    if (!isCalendarConfigured()) {
+      return {
+        reply:
+          "Google Calendar is not configured. Set GOOGLE_SERVICE_ACCOUNT_JSON and GOOGLE_CALENDAR_ID (see services/calendar/googleCalendar.ts).",
+        usedAI: false,
+      };
+    }
+
+    const gcalArgs = raw.slice("gcal".length).trim();
+
+    if (gcalArgs.toLowerCase() === "list") {
+      const res = await listUpcomingEvents(10);
+      if (!res.ok) {
+        return { reply: `Failed to list events: ${res.error}`, usedAI: false };
+      }
+      if (!res.events || res.events.length === 0) {
+        return { reply: "No upcoming events on the calendar.", usedAI: false };
+      }
+      const lines = res.events.map(
+        (e, i) => `${i + 1}. ${e.summary} — ${e.start}`,
+      );
+      return { reply: `Upcoming events:\n${lines.join("\n")}`, usedAI: false };
+    }
+
+    // Parse -t / -sd / -ed / -d flags.
+    const flags: Record<string, string> = {};
+    const re = /(?:\s|^)(-sd|-ed|-t|-d)(?=\s|$)/g;
+    const toks: { flag: string; index: number; len: number }[] = [];
+    let mm;
+    while ((mm = re.exec(gcalArgs)) !== null) {
+      toks.push({ flag: mm[1], index: mm.index, len: mm[0].length });
+    }
+    for (let i = 0; i < toks.length; i++) {
+      const cur = toks[i];
+      const nxt = toks[i + 1];
+      flags[cur.flag] = gcalArgs
+        .substring(cur.index + cur.len, nxt ? nxt.index : gcalArgs.length)
+        .trim();
+    }
+
+    const title = (flags["-t"] || "").trim();
+    const start = parseWhen(flags["-sd"] || "");
+    if (!title || !start) {
+      return {
+        reply:
+          "Usage: !!gcal -t <title> -sd <YYYY-MM-DD [HH:MM]> [-ed <YYYY-MM-DD [HH:MM]>] [-d <description>]\nExample: !!gcal -t Team sync -sd 2026-07-10 15:00\nAlso: !!gcal list",
+        usedAI: false,
+      };
+    }
+    const end = flags["-ed"] ? parseWhen(flags["-ed"]) : addHours(start, 1);
+    if (!end) {
+      return {
+        reply: `Invalid end date "${flags["-ed"]}". Use YYYY-MM-DD or YYYY-MM-DD HH:MM.`,
+        usedAI: false,
+      };
+    }
+
+    const created = await createCalendarEvent({
+      summary: title,
+      startDateTime: start,
+      endDateTime: end,
+      description: flags["-d"] || undefined,
+    });
+    if (created.ok) {
+      return {
+        reply: `Event created: "${title}"\n${start} → ${end}${created.htmlLink ? `\n${created.htmlLink}` : ""}`,
+        usedAI: false,
+      };
+    }
+    return { reply: `Failed to create event: ${created.error}`, usedAI: false };
+  }
+
   // ── !!reply <style> (reply) ───────────────────────────────────────────
   if (cmd.startsWith("reply ")) {
     const style = raw.slice("reply ".length).trim().toLowerCase();
@@ -657,7 +752,7 @@ export async function handleMessage(
         usedAI: false,
       };
     }
-    const systemWithSearch = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nWeb search results:\n${searchContext}`;
+    const systemWithSearch = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n${WEB_RAG_INSTRUCTIONS}\n\nWeb search results:\n${searchContext}`;
     const aiReply = await getGroqReply(
       [{ role: "user", content: query }],
       groqApiKey,
@@ -695,7 +790,7 @@ export async function handleMessage(
 
     if (searchContext) {
       console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
-      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nReal-time web search results:\n${searchContext}`;
+      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n${WEB_RAG_INSTRUCTIONS}\n\nReal-time web search results:\n${searchContext}`;
       modelToUse = GROQ_MODEL_SCOUT;
     } else {
       console.warn(`[SELF] Web search was triggered but returned no results.`);

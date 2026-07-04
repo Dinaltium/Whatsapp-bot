@@ -73,7 +73,7 @@ const CORE_HELP_TEXT = [
   "Core (everyone, any chat):",
   "• !help — this help",
   "• !help -id <0-3> — a specific bot's commands (0 Generic · 1 ECB · 2 DKB · 3 PARAG)",
-  "• !help me — admin/self (!!) commands",
+  "• !!help — admin/self (!!) commands",
   "• !ping — check the bot is online",
   "• !whoami — show your WhatsApp id",
   "• !getjid — show this chat's id",
@@ -86,15 +86,6 @@ const CORE_HELP_TEXT = [
 registerCommand({
   name: "help",
   handler: async (ctx) => {
-    const arg = (ctx.cmdArgs[0] || "").toLowerCase();
-
-    // !help me → admin/self command list
-    if (arg === "me") {
-      const { SELF_HELP_TEXT } = await import("../../agents/SELF/intro");
-      await sendBotReply(ctx.sock, ctx.from, SELF_HELP_TEXT);
-      return;
-    }
-
     const { getBotRegistry } = await import("../../agents/WhatsAppAgent");
 
     // !help -id <n> → that bot's commands

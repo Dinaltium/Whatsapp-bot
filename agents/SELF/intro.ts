@@ -62,6 +62,7 @@ export const SELF_HELP_TEXT = [
   "• !!voice [-cid n | -gid n] <text> — Voice note here, or to a saved chat/group (see !listchats/!listgroups)",
   "• !!reply <style> — Draft reply in style (formal/casual/decline/agree)",
   "• !!search <query> — Web search with real-time results",
+  "• !!gcal -t <title> -sd <date [time]> [-ed <..>] [-d <..>] — Add a Google Calendar event (!!gcal list to view)",
   "• !!<any question> — Ask anything, no domain restriction",
   "• !!<question> -img — Ask and attach a reference image (use \"-\" for a literal hyphen)",
 ].join("\n");

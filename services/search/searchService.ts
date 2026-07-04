@@ -5,12 +5,14 @@ export interface SearchResult {
   url: string;
   content: string;
   score?: number;
+  publishedDate?: string;
 }
 
 export interface SearchResponse {
   provider: "firecrawl" | "tavily";
   answer?: string;
   results: SearchResult[];
+  images?: string[];
 }
 
 // Patterns that indicate URL-based or document extraction needs (use Firecrawl)
@@ -115,21 +117,32 @@ export async function searchWeb(query: string): Promise<SearchResponse> {
     if (urlMatch) {
       const { extractWithFirecrawl } = await import("./providers/firecrawl");
       result = await extractWithFirecrawl(urlMatch[0]);
-    } else if (preferFirecrawl(query) || needsLiveData) {
-      console.info(`[SearchService] Query requires live/extracted data, using Firecrawl primarily.`);
+    } else if (needsLiveData) {
+      // Live/recent info (scores, "latest", news) — use Tavily's news topic
+      // with a short recency window so results are same-week, not stale pages.
+      console.info(`[SearchService] Recency-sensitive query — using Tavily news topic.`);
+      const { searchWithTavily } = await import("./providers/tavily");
+      result = await searchWithTavily(query, {
+        news: true,
+        days: 3,
+        includeImages: true,
+      });
+      if (!result || !result.results || result.results.length === 0) {
+        console.info(`[SearchService] Tavily news empty, falling back to general Tavily.`);
+        result = await searchWithTavily(query, { includeImages: true });
+      }
+    } else if (preferFirecrawl(query)) {
+      console.info(`[SearchService] Extraction query — using Firecrawl.`);
       const { searchWithFirecrawl } = await import("./providers/firecrawl");
       result = await searchWithFirecrawl(query);
-      
       if (!result || !result.results || result.results.length === 0) {
-        console.info(`[SearchService] Firecrawl returned no results, falling back to Tavily.`);
         const { searchWithTavily } = await import("./providers/tavily");
-        result = await searchWithTavily(query);
+        result = await searchWithTavily(query, { includeImages: true });
       }
     } else {
       console.info(`[SearchService] Using Tavily for general knowledge search.`);
       const { searchWithTavily } = await import("./providers/tavily");
-      result = await searchWithTavily(query);
-      
+      result = await searchWithTavily(query, { includeImages: true });
       if (!result || !result.results || result.results.length === 0) {
         console.info(`[SearchService] Tavily returned no results, falling back to Firecrawl.`);
         const { searchWithFirecrawl } = await import("./providers/firecrawl");

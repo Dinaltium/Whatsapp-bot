@@ -140,7 +140,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -186,7 +186,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -232,7 +232,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)\s+-b\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)\s+-b\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -284,7 +284,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)\s+-b\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)\s+-b\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -335,7 +335,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !disablegroup -gid <group_id>\nExample: !disablegroup -gid 4");
       return;
@@ -367,7 +367,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !disablechat -cid <chat_id>\nExample: !disablechat -cid 4");
       return;
@@ -399,7 +399,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !enablegroup -gid <group_id>\nExample: !enablegroup -gid 4");
       return;
@@ -431,7 +431,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !enablechat -cid <chat_id>\nExample: !enablechat -cid 4");
       return;
@@ -458,26 +458,78 @@ registerCommand({
 });
 
 // ── FIND GROUPS ──
+// Lists every group the bot participates in, most-recently-active first.
+// Supports -f <filter> (name/JID) and -p <page>, paginated at the shared size.
 registerCommand({
   name: "findgroups",
   requiresAdmin: true,
   handler: async (ctx) => {
     try {
+      const rawArgs = ctx.cmdArgs.join(" ").trim();
+      let filter = "";
+      const filterMatch = rawArgs.match(/-f\s+([^\-]+)/i);
+      if (filterMatch) {
+        filter = filterMatch[1].trim().toLowerCase();
+      } else {
+        const noFlags = rawArgs.match(/^[^\-]*$/);
+        if (noFlags && rawArgs.length > 0) filter = rawArgs.toLowerCase();
+      }
+      let page = 1;
+      const pageMatch = rawArgs.match(/-p\s+(\d+)/i);
+      if (pageMatch) {
+        page = parseInt(pageMatch[1], 10);
+        if (isNaN(page) || page < 1) page = 1;
+      }
+
       const groups = await ctx.sock.groupFetchAllParticipating();
-      const list = Object.values(groups);
+      let list = Object.values(groups) as any[];
       if (list.length === 0) {
         await sendBotReply(ctx.sock, ctx.from, "The bot is not currently in any groups.");
-      } else {
-        const listWithTime = await Promise.all(list.map(async (g: any) => {
-          const lastTimeStr = await redis.get(`last_group_interaction:${g.id}`);
-          const lastTime = lastTimeStr ? parseInt(lastTimeStr, 10) : 0;
-          return { g, lastTime };
-        }));
-        listWithTime.sort((a, b) => b.lastTime - a.lastTime);
-        const top30 = listWithTime.slice(0, 30).map(item => item.g);
-        const formatted = top30.map((g: any, idx) => `${idx + 1}. ${g.subject} | JID: ${g.id}`);
-        await sendBotReply(ctx.sock, ctx.from, `Groups the bot is in:\n${formatted.join("\n")}`);
+        return;
       }
+
+      // Sort by most-recent bot interaction (0 = never seen).
+      const withTime = await Promise.all(
+        list.map(async (g: any) => {
+          const t = await redis.get(`last_group_interaction:${g.id}`);
+          return { g, lastTime: t ? parseInt(t, 10) : 0 };
+        }),
+      );
+      withTime.sort((a, b) => b.lastTime - a.lastTime);
+      let sorted = withTime.map((x) => x.g);
+
+      if (filter) {
+        sorted = sorted.filter(
+          (g: any) =>
+            (g.subject || "").toLowerCase().includes(filter) ||
+            String(g.id).toLowerCase().includes(filter),
+        );
+      }
+      if (sorted.length === 0) {
+        await sendBotReply(ctx.sock, ctx.from, `No groups match "${filter}".`);
+        return;
+      }
+
+      const { paginate, PAGINATION_MAX_VIEW } = await import(
+        "../../../services/DKB/pagination"
+      );
+      const { pageItems, page: p, totalPages, total } = paginate(sorted, page);
+      const offset = (p - 1) * PAGINATION_MAX_VIEW;
+      const formatted = pageItems.map(
+        (g: any, idx) => `${offset + idx + 1}. ${g.subject} | JID: ${g.id}`,
+      );
+      const header = filter
+        ? `Groups matching "${filter}" (${total}):`
+        : `Groups the bot is in (${total}, recent first):`;
+      const footer =
+        totalPages > 1
+          ? `\n\nPage ${p}/${totalPages}${p < totalPages ? ` — !findgroups -p ${p + 1} for more.` : ""}`
+          : "";
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        `${header}\n${formatted.join("\n")}${footer}`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await sendBotReply(ctx.sock, ctx.from, `Failed to fetch groups:\n${msg}`);
@@ -534,7 +586,9 @@ registerCommand({
         return;
       }
 
-      const PAGE_SIZE = 20;
+      const { PAGINATION_MAX_VIEW: PAGE_SIZE } = await import(
+        "../../../services/DKB/pagination"
+      );
       const totalItems = entries.length;
       const totalPages = Math.ceil(totalItems / PAGE_SIZE);
 
