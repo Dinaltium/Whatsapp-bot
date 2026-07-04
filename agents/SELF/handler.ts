@@ -733,8 +733,31 @@ export async function handleMessage(
     }
     
     console.info(`[SELF] Executing explicit web search for query: "${query}"`);
+
+    // Agentic tool-loop first (dedicated live-data APIs + abstain), then legacy.
+    if (groqApiKey) {
+      const { isAgenticAvailable, agenticAnswer } = await import(
+        "../../services/search/agenticSearch"
+      );
+      if (isAgenticAvailable()) {
+        const base = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
+        const result = await agenticAnswer({
+          query,
+          groqApiKey,
+          model: GROQ_MODEL_DEFAULT,
+          baseSystemPrompt: base,
+        });
+        if (result?.answer) {
+          console.info(
+            `[SELF] !!search agentic answer via tools: [${result.usedTools.join(", ") || "none"}].`,
+          );
+          return { reply: result.answer, usedAI: true };
+        }
+      }
+    }
+
     const searchContext = await searchWeb(query);
-    
+
     if (!searchContext) {
       return {
         reply: `Web search failed or no results found for "${query}". Ensure search API keys (TAVILY_API_KEY or FIRECRAWL_API_KEY) are configured in the environment.`,
@@ -768,6 +791,12 @@ export async function handleMessage(
 
   let systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
   let modelToUse = GROQ_MODEL_DEFAULT;
+  // Set when the agentic tool-loop produced a grounded answer directly.
+  let agenticReply: string | null = null;
+  let agenticImage: string | undefined;
+  // True for live/current-info routes — suppresses the generic-banner image
+  // fallback so we only ever attach an image the search actually surfaced.
+  let liveInfoRoute = false;
 
   // Query classification: DK24-community questions are answerable from Postgres
   // (clubs/events/mentors/projects), so answer from the local DB context instead
@@ -781,40 +810,76 @@ export async function handleMessage(
     systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\nDK24 community database:\n${dbContext}`;
     modelToUse = GROQ_MODEL_DEFAULT;
   } else if (requiresCurrentInfo(raw)) {
-    console.info(`[SELF] Current info pattern detected in prompt. Triggering web search.`);
-    const searchContext = await searchWeb(raw);
+    liveInfoRoute = true;
+    // Prefer the agentic tool-loop: it routes live scores/prices to dedicated
+    // APIs and abstains instead of hallucinating. Falls back to legacy search.
+    const { isAgenticAvailable, agenticAnswer } = await import(
+      "../../services/search/agenticSearch"
+    );
+    if (isAgenticAvailable()) {
+      console.info(`[SELF] Current-info query — running agentic search.`);
+      const base = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}`;
+      const result = await agenticAnswer({
+        query: raw,
+        groqApiKey,
+        model: GROQ_MODEL_DEFAULT,
+        baseSystemPrompt: base,
+        history: session.messages.slice(-6),
+        wantImage,
+      });
+      if (result?.answer) {
+        console.info(
+          `[SELF] Agentic answer via tools: [${result.usedTools.join(", ") || "none"}].`,
+        );
+        agenticReply = result.answer;
+        agenticImage = result.imageUrl;
+      }
+    }
 
-    if (searchContext) {
-      console.info(`[SELF] Successfully retrieved web context. Injecting into system prompt and switching to scout model.`);
-      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n${WEB_RAG_INSTRUCTIONS}\n\nReal-time web search results:\n${searchContext}`;
-      modelToUse = GROQ_MODEL_SCOUT;
-    } else {
-      console.warn(`[SELF] Web search was triggered but returned no results.`);
-      systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n[SYSTEM WARNING: A web search was attempted for this query but failed. Please inform the user that you cannot access the live web right now and your knowledge may be outdated.]`;
+    if (!agenticReply) {
+      console.info(`[SELF] Agentic unavailable/failed — legacy web search fallback.`);
+      const searchContext = await searchWeb(raw);
+      if (searchContext) {
+        systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n${WEB_RAG_INSTRUCTIONS}\n\nReal-time web search results:\n${searchContext}`;
+        modelToUse = GROQ_MODEL_SCOUT;
+      } else {
+        console.warn(`[SELF] Web search was triggered but returned no results.`);
+        systemPrompt = `${SELF_SYSTEM_PROMPT}\n\nCurrent Date & Time (IST): ${formatISTDate(nowIST())}\n\n[SYSTEM WARNING: A web search was attempted for this query but failed. Tell the user you cannot access the live web right now and do NOT invent live figures.]`;
+      }
     }
   } else {
     console.debug(`[SELF] No current info pattern detected. Proceeding with standard generation.`);
   }
 
-  // Use last 8 session messages as context
-  const conversationMessages = [
-    ...session.messages.slice(-8),
-    { role: "user" as const, content: raw },
-  ];
-
-  const aiReply = await getGroqReply(
-    conversationMessages,
-    groqApiKey,
-    modelToUse,
-    systemPrompt,
-  );
+  // The agentic loop already produced a grounded answer; otherwise generate now.
+  let aiReply: string;
+  if (agenticReply) {
+    aiReply = agenticReply;
+  } else {
+    const conversationMessages = [
+      ...session.messages.slice(-8),
+      { role: "user" as const, content: raw },
+    ];
+    aiReply = await getGroqReply(
+      conversationMessages,
+      groqApiKey,
+      modelToUse,
+      systemPrompt,
+    );
+  }
 
   // -img: attach a reference image with the answer as its caption (one message).
-  // Falls back to text-only if no image is found or the send fails.
+  // On live/current-info routes we only use an image the search actually
+  // surfaced (agenticImage) — never a blind generic-banner lookup, which was
+  // the source of the irrelevant-image bug on score/news queries. Non-live
+  // queries still fall back to a reference-image search.
   if (wantImage) {
     try {
-      const { fetchReferenceImage } = await import("../../utils/webSearch");
-      const imgUrl = await fetchReferenceImage(raw);
+      let imgUrl: string | null = agenticImage || null;
+      if (!imgUrl && !liveInfoRoute) {
+        const { fetchReferenceImage } = await import("../../utils/webSearch");
+        imgUrl = await fetchReferenceImage(raw);
+      }
       if (imgUrl) {
         const { scrubSecrets } = await import("../../security/secretScrubber");
         await sock.sendMessage(from, {
