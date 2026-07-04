@@ -345,7 +345,7 @@ registerCommand({
     }
 
     // Set by allowlisted group id
-    const match = ctx.cmdArgs.join(" ").match(/^-(?:gid|id)\s+(\d+)$/i);
+    const match = ctx.cmdArgs.join(" ").match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,

@@ -502,8 +502,8 @@ export async function handleMessage(
     let destLabel = "this chat";
     let spokenArgs = voiceArgs;
 
-    // -cid <n> targets a saved chat, -gid <n> a saved group (-id = chat alias).
-    const idMatch = voiceArgs.match(/^-(gid|cid|id)\s+(\d+)\s*([\s\S]*)$/i);
+    // -cid <n> targets a saved chat, -gid <n> a saved group.
+    const idMatch = voiceArgs.match(/^-(gid|cid)\s+(\d+)\s*([\s\S]*)$/i);
     if (idMatch) {
       const flag = idMatch[1].toLowerCase();
       const targetId = parseInt(idMatch[2], 10);

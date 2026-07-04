@@ -140,7 +140,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -186,7 +186,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -232,7 +232,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)\s+-b\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)\s+-b\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -284,7 +284,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)\s+-b\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)\s+-b\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(
         ctx.sock,
@@ -335,7 +335,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !disablegroup -gid <group_id>\nExample: !disablegroup -gid 4");
       return;
@@ -367,7 +367,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !disablechat -cid <chat_id>\nExample: !disablechat -cid 4");
       return;
@@ -399,7 +399,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !enablegroup -gid <group_id>\nExample: !enablegroup -gid 4");
       return;
@@ -431,7 +431,7 @@ registerCommand({
   requiresAdmin: true,
   handler: async (ctx) => {
     const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-(?:gid|cid|id)\s+(\d+)$/i);
+    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
     if (!match) {
       await sendBotReply(ctx.sock, ctx.from, "Usage: !enablechat -cid <chat_id>\nExample: !enablechat -cid 4");
       return;
