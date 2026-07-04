@@ -12,6 +12,13 @@ auth/
 .env.local
 .env.*.local
 
+# Service-account keys / other secret files (never commit)
+secrets/
+*-key.json
+*service-account*.json
+*serviceaccount*.json
+gcal-key.json
+
 # Runtime config (allowlists managed per-deploy)
 allowed-groups.json
 allowedGroups.json
