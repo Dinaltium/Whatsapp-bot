@@ -38,6 +38,13 @@ export function registerContactSyncHandlers(sock: any): void {
           }
         }
 
+        // contact.name is the address-book name YOU assigned → a saved contact.
+        // (verifiedName/notify are their own profile name, not "saved".)
+        if (contact.name) {
+          const { markSavedContact } = await import("../../agents/Generic/autoResponder");
+          await markSavedContact([cid, clid, cpn]);
+        }
+
         let resolvedLid: string | null = null;
         let resolvedPn: string | null = null;
 
@@ -95,6 +102,11 @@ export function registerContactSyncHandlers(sock: any): void {
             await redis.hset("contact_names", cpn, name);
             namesStored++;
           }
+        }
+
+        if (contact.name) {
+          const { markSavedContact } = await import("../../agents/Generic/autoResponder");
+          await markSavedContact([cid, clid, cpn]);
         }
 
         if (clid && cpn) {

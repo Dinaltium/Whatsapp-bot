@@ -112,6 +112,21 @@ async function processInboundMessage(
       return;
     }
 
+    // ── OWNER PRESENCE (activity proxy) ──────────────────────────────────
+    // Any message the owner sends (phone OR WhatsApp Web) arrives here as
+    // fromMe and is not a bot-sent message — record it so the generic
+    // auto-responder knows the owner is active and shouldn't step in.
+    if (msg.key?.fromMe && !isSentByBot) {
+      try {
+        const { recordOwnerActivity } = await import(
+          "../agents/Generic/autoResponder"
+        );
+        await recordOwnerActivity();
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     // ── ANTI-REPLAY GUARDS ──
     if (isHistoricalMessage(msg)) return;
 
@@ -235,6 +250,28 @@ async function processInboundMessage(
       if (wasDispatched) {
         return;
       }
+    }
+
+    // ── GENERIC AUTO-RESPONDER (personal DMs, saved contacts only) ───────
+    // Handles inbound 1:1 DMs that are NOT a configured bot chat. Returns true
+    // when it owns the message (greeting / limited reply / silent over-budget),
+    // in which case we stop here. Groups, admins, and allowlisted chats fall
+    // through to the normal flow.
+    try {
+      const { handleGenericInbound } = await import(
+        "../agents/Generic/autoResponder"
+      );
+      const handledGeneric = await handleGenericInbound({
+        sock,
+        from: from || "",
+        senderId,
+        text,
+        isAdmin: isAdminSender(msg, senderId),
+        groqApiKey: GROQ_API_KEY,
+      });
+      if (handledGeneric) return;
+    } catch (err) {
+      console.error("[messageRouter] generic auto-responder error:", err);
     }
 
     if (await shouldSkipMessage(sock, msg, from, text, senderId)) {
