@@ -21,8 +21,9 @@ import chatConfig from "../../config/chatAllowlist";
 import { getGroqReply } from "../../ai/groqClient";
 import { GENERIC_SYSTEM_PROMPT, GENERIC_HELP_TEXT } from "./intro";
 import { decideGenericAction } from "./genericPolicy";
+import { logStructured, getJidHash } from "../../utils/logger";
 
-const ONLINE_WINDOW_MS = Number(process.env.OWNER_ONLINE_WINDOW_MS) || 5 * 60 * 1000;
+const ONLINE_WINDOW_MS = Number(process.env.OWNER_ONLINE_WINDOW_MS) || 30 * 1000;
 const DAILY_LIMIT = Number(process.env.GENERIC_DAILY_LIMIT) || 3;
 const OWNER_NAME = process.env.OWNER_NAME || "the owner";
 
@@ -146,7 +147,16 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
   if (chatConfig.isChatAllowed(from)) return false;
 
   const isSaved = await isSavedContact(senderId, from);
-  if (!isSaved) return false; // not saved → let normal flow ignore it
+  if (!isSaved) {
+    // Visible so it's obvious when a test number simply isn't a saved contact.
+    logStructured({
+      event: "generic_autoresponder",
+      reason: "skip_not_saved",
+      chatHash: getJidHash(from),
+      senderHash: getJidHash(senderId),
+    });
+    return false; // not saved → let normal flow ignore it
+  }
 
   const jidKey = senderId || from;
   const count = await getCount(jidKey);
@@ -162,6 +172,15 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
     count,
     limit: DAILY_LIMIT,
     ownerOnline,
+  });
+
+  logStructured({
+    event: "generic_autoresponder",
+    reason: action.type,
+    chatHash: getJidHash(from),
+    count,
+    ownerOnline,
+    isCommand: text.startsWith("!"),
   });
 
   const sessionKey = buildSessionKey(from, senderId);

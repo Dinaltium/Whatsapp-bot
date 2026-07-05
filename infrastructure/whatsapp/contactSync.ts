@@ -118,4 +118,26 @@ export function registerContactSyncHandlers(sock: any): void {
       }
     } catch (_e) { /* non-critical */ }
   });
+
+  // Initial contact sync on connect arrives here — seed the saved-contacts set
+  // (address-book names) so the generic auto-responder knows who to reply to.
+  sock.ev.on("messaging-history.set", async (payload: any) => {
+    try {
+      const contacts = payload?.contacts;
+      if (!Array.isArray(contacts) || !contacts.length) return;
+      const { markSavedContact } = await import("../../agents/Generic/autoResponder");
+      let saved = 0;
+      for (const contact of contacts) {
+        if (!contact?.name) continue; // address-book name only = saved
+        const cid = contact.id ? normalizeJid(contact.id) : null;
+        const clid = (contact as any).lid ? normalizeJid((contact as any).lid) : null;
+        const cpn = (contact as any).phoneNumber ? normalizeJid((contact as any).phoneNumber) : null;
+        await markSavedContact([cid, clid, cpn]);
+        saved++;
+      }
+      if (saved > 0) {
+        logEvent("info", { event: "saved_contacts_seeded", count: saved });
+      }
+    } catch (_e) { /* non-critical */ }
+  });
 }
