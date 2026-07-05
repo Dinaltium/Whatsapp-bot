@@ -26,6 +26,11 @@ import { logStructured, getJidHash } from "../../utils/logger";
 const ONLINE_WINDOW_MS = Number(process.env.OWNER_ONLINE_WINDOW_MS) || 30 * 1000;
 const DAILY_LIMIT = Number(process.env.GENERIC_DAILY_LIMIT) || 3;
 const OWNER_NAME = process.env.OWNER_NAME || "the owner";
+// Who the generic bot may reply to in unconfigured DMs:
+//   "all"   → any 1:1 DM (still offline-only greeting + 3/day + restricted).
+//   "saved" → only address-book contacts (needs a working contact sync; can be
+//             empty on long-linked sessions, so it is NOT the default).
+const REPLY_AUDIENCE = (process.env.GENERIC_REPLY_AUDIENCE || "all").toLowerCase();
 
 // ── Owner presence (activity proxy) ─────────────────────────────────────────
 export async function recordOwnerActivity(): Promise<void> {
@@ -146,9 +151,11 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
   if (isAdmin || !text || text.startsWith("!!")) return false;
   if (chatConfig.isChatAllowed(from)) return false;
 
-  const isSaved = await isSavedContact(senderId, from);
-  if (!isSaved) {
-    // Visible so it's obvious when a test number simply isn't a saved contact.
+  // In "saved" mode require an address-book contact; in "all" mode reply to any
+  // 1:1 DM (the offline-only greeting + 3/day + restricted persona keep it safe).
+  const requireSaved = REPLY_AUDIENCE === "saved";
+  const isSaved = requireSaved ? await isSavedContact(senderId, from) : true;
+  if (requireSaved && !isSaved) {
     logStructured({
       event: "generic_autoresponder",
       reason: "skip_not_saved",
