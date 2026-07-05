@@ -521,8 +521,6 @@ async function processInboundMessage(
 
     const parts = userPrompt.split(/\s+/);
     let cmdName = (parts[0] || "").toLowerCase();
-    if (cmdName === "removegroup") cmdName = "rmgroup";
-    if (cmdName === "removechat") cmdName = "rmchat";
     if (cmdName === "listgroup") cmdName = "listgroups";
     if (cmdName === "listchat") cmdName = "listchats";
     const cmdArgs = parts.slice(1);
@@ -604,11 +602,9 @@ async function processInboundMessage(
         "reset",
         "getjid",
         "whoami",
-        "addgroup",
-        "rmgroup",
+        "add",
+        "rm",
         "listgroups",
-        "addchat",
-        "rmchat",
         "listchats",
         "changebot",
         "editgroup",
