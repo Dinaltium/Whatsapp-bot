@@ -47,183 +47,171 @@ registerCommand({
   }
 });
 
-// ── ADD GROUP ──
+// ── ADD (unified: !add -g|-c [jid] [-b <0-3>]) ──
+// -g group, -c chat. Omit the jid to add the CURRENT group/chat; default Bot 0.
+// Examples: !add -c -b 2  ·  !add -g 12036...@g.us -b 2
 registerCommand({
-  name: "addgroup",
+  name: "add",
   requiresAdmin: true,
   handler: async (ctx) => {
-    let target = ctx.cmdArgs[0];
-    const botNumber = ctx.cmdArgs[1] ? parseInt(ctx.cmdArgs[1], 10) : 0;
+    const toks = [...ctx.cmdArgs];
 
-    if (!target) {
+    // -b <n> (optional bot number, 0-3, default 0)
+    let botNumber = 0;
+    const bi = toks.findIndex((t) => t.toLowerCase() === "-b");
+    if (bi !== -1) {
+      botNumber = parseInt(toks[bi + 1] || "", 10);
+      toks.splice(bi, 2);
+    }
+    if (isNaN(botNumber) || botNumber < 0 || botNumber > 3) botNumber = 0;
+
+    const wantGroup = toks.some((t) => t.toLowerCase() === "-g");
+    const wantChat = toks.some((t) => t.toLowerCase() === "-c");
+    const rest = toks.filter(
+      (t) => t.toLowerCase() !== "-g" && t.toLowerCase() !== "-c",
+    );
+    const explicit = rest[0] ? (normalizeJid(rest[0]) as string) : "";
+
+    if (wantGroup === wantChat) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !addgroup <group-jid> [bot-number]\nBot 0: Generic | Bot 1: ECB | Bot 2: DKB | Bot 3: PARAG"
+        "Usage: !add -g|-c [jid] [-b <0-3>]\n-g group, -c chat. Omit the jid to add THIS chat/group. Default Bot 0.\nExamples: !add -c -b 2  |  !add -g 12036...@g.us -b 2",
       );
       return;
     }
 
-    target = normalizeJid(target) as string;
-    const ok = await groupConfig.addGroup(target, isNaN(botNumber) ? 0 : botNumber);
-    if (ok) {
-      const groupEntry = groupConfig.getGroupEntryByJid(target);
-      const idLabel = groupEntry ? ` (ID: ${groupEntry.id})` : "";
-      const groupName = await safeGetGroupName(ctx.sock, target);
+    if (wantGroup) {
+      const jid = explicit || (ctx.from.endsWith("@g.us") ? ctx.from : "");
+      if (!jid || !jid.endsWith("@g.us")) {
+        await sendBotReply(
+          ctx.sock,
+          ctx.from,
+          "Run !add -g inside the group, or pass a group JID (…@g.us).",
+        );
+        return;
+      }
+      const ok = await groupConfig.addGroup(jid, botNumber);
+      if (!ok) {
+        await sendBotReply(ctx.sock, ctx.from, `Failed to add ${jid}.`);
+        return;
+      }
+      const entry = groupConfig.getGroupEntryByJid(jid);
+      const idLabel = entry ? ` (ID: ${entry.id})` : "";
+      const name = await safeGetGroupName(ctx.sock, jid);
       try {
         const { logAction } = await import("../../../storage/core/auditRepository");
         await logAction(
           ctx.senderId || "unknown",
           "add_group",
-          groupEntry ? String(groupEntry.id) : null,
-          target,
-          JSON.stringify({ botNumber: isNaN(botNumber) ? 0 : botNumber })
+          entry ? String(entry.id) : null,
+          jid,
+          JSON.stringify({ botNumber }),
         );
-      } catch (e) {}
+      } catch {}
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        `Added group ${groupName} (${target}) to group allowlist${idLabel} (Bot ${isNaN(botNumber) ? 0 : botNumber}).`
-      );
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, `Failed to add ${target}. Ensure it's a valid group JID.`);
-    }
-  }
-});
-
-// ── ADD CHAT ──
-registerCommand({
-  name: "addchat",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    let target = ctx.cmdArgs[0];
-    const botNumber = ctx.cmdArgs[1] ? parseInt(ctx.cmdArgs[1], 10) : 0;
-
-    if (!target) {
-      await sendBotReply(
-        ctx.sock,
-        ctx.from,
-        "Usage: !addchat <chat-jid> [bot-number]\nBot 0: Generic | Bot 1: ECB | Bot 2: DKB | Bot 3: PARAG"
+        `Added group ${name} (${jid})${idLabel} | Bot ${botNumber} (${botLabel(botNumber)}).`,
       );
       return;
     }
 
-    target = normalizeJid(target) as string;
-    const ok = await chatConfig.addChat(target, isNaN(botNumber) ? 0 : botNumber);
-    if (ok) {
-      const chatEntry = chatConfig.getChatEntryByJid(target);
-      const idLabel = chatEntry ? ` (ID: ${chatEntry.id})` : "";
-      try {
-        const { logAction } = await import("../../../storage/core/auditRepository");
-        await logAction(
-          ctx.senderId || "unknown",
-          "add_chat",
-          chatEntry ? String(chatEntry.id) : null,
-          target,
-          JSON.stringify({ botNumber: isNaN(botNumber) ? 0 : botNumber })
-        );
-      } catch (e) {}
+    // chat
+    const jid = explicit || ctx.from;
+    if (!jid || jid.endsWith("@g.us")) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        `Added chat (${target}) to chat allowlist${idLabel} (Bot ${isNaN(botNumber) ? 0 : botNumber}).`
-      );
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, `Failed to add ${target}. Ensure it's a valid chat JID.`);
-    }
-  }
-});
-
-// ── RM GROUP (WITH DIALOG CONFIRMATION INTERCEPT) ──
-registerCommand({
-  name: "rmgroup",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
-    if (!match) {
-      await sendBotReply(
-        ctx.sock,
-        ctx.from,
-        "Usage: !rmgroup -gid <group_id>\nExample: !rmgroup -gid 4"
+        "Run !add -c inside the chat, or pass a chat JID (…@s.whatsapp.net).",
       );
       return;
     }
-
-    const groupId = parseInt(match[1], 10);
-    const groupEntry = groupConfig.getGroupEntryById(groupId);
-    if (!groupEntry) {
-      await sendBotReply(
-        ctx.sock,
-        ctx.from,
-        `No group found in the allowlist with ID ${groupId}.`
-      );
+    const ok = await chatConfig.addChat(jid, botNumber);
+    if (!ok) {
+      await sendBotReply(ctx.sock, ctx.from, `Failed to add ${jid}.`);
       return;
     }
-
-    const groupName = await safeGetGroupName(ctx.sock, groupEntry.jid);
-
-    ctx.session.pendingDeleteGroup = {
-      id: groupId,
-      jid: groupEntry.jid,
-      botNumber: groupEntry.botNumber,
-    };
-
+    const entry = chatConfig.getChatEntryByJid(jid);
+    const idLabel = entry ? ` (ID: ${entry.id})` : "";
+    const name = await safeGetContactName(jid);
+    try {
+      const { logAction } = await import("../../../storage/core/auditRepository");
+      await logAction(
+        ctx.senderId || "unknown",
+        "add_chat",
+        entry ? String(entry.id) : null,
+        jid,
+        JSON.stringify({ botNumber }),
+      );
+    } catch {}
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to remove Group ID: ${groupId} | Name: ${groupName} | JID: ${groupEntry.jid} | Bot: ${groupEntry.botNumber} (${botLabel(groupEntry.botNumber)}) from the allowlist?\n(Enter !YES for confirmation)`
+      `Added chat ${name} (${jid})${idLabel} | Bot ${botNumber} (${botLabel(botNumber)}).`,
     );
-
-    const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
-    await saveSession(sessionKey, ctx.session);
-  }
+  },
 });
 
-// ── RM CHAT (WITH DIALOG CONFIRMATION INTERCEPT) ──
+// ── RM (unified: !rm -g|-c <id>) — confirmation via !YES ──
 registerCommand({
-  name: "rmchat",
+  name: "rm",
   requiresAdmin: true,
   handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
-    if (!match) {
+    const toks = [...ctx.cmdArgs];
+    const wantGroup = toks.some((t) => /^-g(id)?$/i.test(t));
+    const wantChat = toks.some((t) => /^-c(id)?$/i.test(t));
+    const rest = toks.filter((t) => !/^-(g|c)(id)?$/i.test(t));
+    const id = parseInt(rest[0] || "", 10);
+
+    if (wantGroup === wantChat || isNaN(id)) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !rmchat -cid <chat_id>\nExample: !rmchat -cid 4"
+        "Usage: !rm -g <group_id> | !rm -c <chat_id>\nUse !listgroups / !listchats to find the id.",
       );
       return;
     }
 
-    const chatId = parseInt(match[1], 10);
-    const chatEntry = chatConfig.getChatEntryById(chatId);
-    if (!chatEntry) {
+    if (wantGroup) {
+      const entry = groupConfig.getGroupEntryById(id);
+      if (!entry) {
+        await sendBotReply(ctx.sock, ctx.from, `No group found with ID ${id}.`);
+        return;
+      }
+      const name = await safeGetGroupName(ctx.sock, entry.jid);
+      ctx.session.pendingDeleteGroup = {
+        id,
+        jid: entry.jid,
+        botNumber: entry.botNumber,
+      };
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        `No chat found in the allowlist with ID ${chatId}.`
+        `Remove Group ID: ${id} | Name: ${name} | JID: ${entry.jid} | Bot: ${entry.botNumber} (${botLabel(entry.botNumber)})?\n(Enter !YES to confirm)`,
       );
+      await saveSession(buildSessionKey(ctx.from, ctx.senderId), ctx.session);
       return;
     }
 
+    const entry = chatConfig.getChatEntryById(id);
+    if (!entry) {
+      await sendBotReply(ctx.sock, ctx.from, `No chat found with ID ${id}.`);
+      return;
+    }
+    const name = await safeGetContactName(entry.jid);
     ctx.session.pendingDeleteChat = {
-      id: chatId,
-      jid: chatEntry.jid,
-      botNumber: chatEntry.botNumber,
+      id,
+      jid: entry.jid,
+      botNumber: entry.botNumber,
     };
-
-    const name = await safeGetContactName(chatEntry.jid);
-
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to remove Chat ID: ${chatId} | Name: ${name} | JID: ${chatEntry.jid} | Bot: ${chatEntry.botNumber} (${botLabel(chatEntry.botNumber)}) from the allowlist?\n(Enter !YES for confirmation)`
+      `Remove Chat ID: ${id} | Name: ${name} | JID: ${entry.jid} | Bot: ${entry.botNumber} (${botLabel(entry.botNumber)})?\n(Enter !YES to confirm)`,
     );
-
-    const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
-    await saveSession(sessionKey, ctx.session);
-  }
+    await saveSession(buildSessionKey(ctx.from, ctx.senderId), ctx.session);
+  },
 });
 
 // ── EDIT GROUP (WITH DIALOG CONFIRMATION INTERCEPT) ──

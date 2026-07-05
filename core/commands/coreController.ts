@@ -6,6 +6,30 @@ import { normalizeJid } from "../../security/rbac";
 import { saveSession } from "../state";
 import { buildSessionKey } from "../../bot";
 
+// Management commands shown to the owner on plain `!help` (bot command sets are
+// only shown with `!help -b <n>`).
+const ADMIN_HELP_TEXT = [
+  "Admin commands (owner only):",
+  "",
+  "Allowlist:",
+  "• !add -g|-c [jid] [-b <0-3>] — allow THIS (or a given) group/chat; default Bot 0",
+  "• !rm -g|-c <id> — remove from allowlist (confirm with !YES)",
+  "• !listgroups · !listchats — list allowlisted groups/chats",
+  "• !editgroup -gid <id> -b <n> · !editchat -cid <id> -b <n> — change assigned bot",
+  "• !enablegroup/!disablegroup -gid <id> · !enablechat/!disablechat -cid <id>",
+  "• !findgroups [-f <q>] [-p] · !findchats — search joined groups / known chats",
+  "• !changebot — reassign a bot",
+  "",
+  "Roles & ops:",
+  "• !manage <role> <+phone> | -l | -p — mentor role management (DKB)",
+  "• !notify -id <groupId> — set the member-join notify group",
+  "• !neonping · !neonconnect — database diagnostics",
+  "",
+  "Info:",
+  "• !help -b <0-3> — a specific bot's user commands",
+  "• !!help — personal (!!) commands",
+].join("\n");
+
 /** First configured admin JID, normalized — the owner's own identity. */
 function ownerJid(): string | null {
   const first = (process.env.ADMIN_JIDS || "").split(",")[0]?.trim();
@@ -131,12 +155,9 @@ registerCommand({
         );
         return;
       }
-      await sendBotReply(
-        ctx.sock,
-        ctx.from,
-        buildHelpText(botNumber, { isMentor: true }) +
-          "\n\nAdmin: !help -b <0-3> for any bot · !!help for personal (!!) commands",
-      );
+      // Plain !help for the owner → management commands (not a bot's command
+      // set; those need -b). PATCHES Fix #1 (#15/#20).
+      await sendBotReply(ctx.sock, ctx.from, ADMIN_HELP_TEXT);
       return;
     }
 

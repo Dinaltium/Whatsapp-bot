@@ -284,8 +284,6 @@ export async function shouldSkipMessage(
   let commandName = normalizedText.startsWith(COMMAND_PREFIX)
     ? normalizedText.slice(COMMAND_PREFIX.length).split(/\s+/)[0]
     : "";
-  if (commandName === "removegroup") commandName = "rmgroup";
-  if (commandName === "removechat") commandName = "rmchat";
   if (commandName === "listgroup") commandName = "listgroups";
   if (commandName === "listchat") commandName = "listchats";
 
@@ -342,11 +340,9 @@ export async function shouldSkipMessage(
   const publicExemptCommands: string[] = [];
 
   const adminOnlyCommands = [
-    "addgroup",
-    "rmgroup",
+    "add",
+    "rm",
     "listgroups",
-    "addchat",
-    "rmchat",
     "listchats",
     "changebot",
     "editgroup",
