@@ -337,8 +337,9 @@ export async function shouldSkipMessage(
     }
   }
 
-  // Public utility commands that can be run in any group or DM (even unapproved ones)
-  const publicExemptCommands = ["getjid", "whoami"];
+  // No commands are publicly exempt from the allowlist anymore — utility probes
+  // (getjid/whoami) are owner-only (see adminOnlyCommands).
+  const publicExemptCommands: string[] = [];
 
   const adminOnlyCommands = [
     "addgroup",
@@ -359,6 +360,11 @@ export async function shouldSkipMessage(
     "neonconnect",
     "notify",
     "reveal",
+    // Owner-only utility/probe commands — silently skipped for non-admins so
+    // they can't be used to fingerprint the account from any chat.
+    "ping",
+    "getjid",
+    "whoami",
     // NOTE: "manage" is NOT here — it has its own RBAC gate inside the handler
     // that allows both admins AND users with the role.manage permission.
   ];

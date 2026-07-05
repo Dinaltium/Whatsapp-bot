@@ -6,9 +6,16 @@ import { normalizeJid } from "../../security/rbac";
 import { saveSession } from "../state";
 import { buildSessionKey } from "../../bot";
 
-// ── PING COMMAND ──
+/** First configured admin JID, normalized — the owner's own identity. */
+function ownerJid(): string | null {
+  const first = (process.env.ADMIN_JIDS || "").split(",")[0]?.trim();
+  return first ? (normalizeJid(first) as string) || null : null;
+}
+
+// ── PING COMMAND (owner-only) ──
 registerCommand({
   name: "ping",
+  requiresAdmin: true,
   handler: async (ctx) => {
     await sendBotReply(ctx.sock, ctx.from, "pong");
   },
@@ -18,7 +25,7 @@ registerCommand({
 registerCommand({
   name: "hello",
   handler: async (ctx) => {
-    await sendBotReply(ctx.sock, ctx.from, "PARAG online and operational.");
+    await sendBotReply(ctx.sock, ctx.from, "Online and operational.");
   },
 });
 
@@ -33,17 +40,19 @@ registerCommand({
     const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
     await saveSession(sessionKey, ctx.session);
 
+    // Neutral wording — not tied to any one bot's commands.
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      "Context reset for your session. Start with a new !tech or !hackathon question.",
+      "Your conversation context has been cleared.",
     );
   },
 });
 
-// ── GETJID COMMAND ──
+// ── GETJID COMMAND (owner-only) ──
 registerCommand({
   name: "getjid",
+  requiresAdmin: true,
   handler: async (ctx) => {
     if (ctx.from?.endsWith("@g.us")) {
       await sendBotReply(ctx.sock, ctx.from, `Group JID: ${ctx.from}`);
@@ -53,15 +62,26 @@ registerCommand({
   },
 });
 
-// ── WHOAMI COMMAND ──
+// ── WHOAMI COMMAND (owner-only, owner's own DM only) ──
+// Restricted to the owner AND only inside the owner's own chat — never in a
+// group or someone else's DM. Prevents it being used as an account probe.
 registerCommand({
   name: "whoami",
+  requiresAdmin: true,
   handler: async (ctx) => {
-    const normalized = normalizeJid(ctx.senderId);
+    const owner = ownerJid();
+    if (!owner || normalizeJid(ctx.from) !== owner) {
+      return; // silent: don't confirm the command exists elsewhere
+    }
+    // Show the raw key JID and its normalized form (they can legitimately
+    // differ — e.g. a device-suffixed or @lid raw id).
+    const rawJid =
+      ctx.msg.key?.participant || ctx.msg.key?.remoteJid || ctx.senderId;
+    const normalized = normalizeJid(rawJid);
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Your JID: ${ctx.senderId}\nNormalized: ${normalized}`,
+      `Your JID: ${rawJid}\nNormalized: ${normalized}`,
     );
   },
 });
@@ -88,9 +108,10 @@ registerCommand({
       botNumber = chatConfig.getChatBot(ctx.from)?.botNumber ?? 0;
     }
 
-    const idMatch = ctx.cmdArgs.join(" ").match(/^-id\s+(\d+)$/i);
+    // Bot selector flag: `-b <n>` or `-bot <n>`.
+    const idMatch = ctx.cmdArgs.join(" ").match(/^-b(?:ot)?\s+(\d+)$/i);
 
-    // ── Owner: unrestricted, `-id` points at any bot ──
+    // ── Owner: unrestricted, `-b` points at any bot ──
     if (isAdmin) {
       if (idMatch) {
         const target = parseInt(idMatch[1], 10);
@@ -99,7 +120,7 @@ registerCommand({
           await sendBotReply(
             ctx.sock,
             ctx.from,
-            `No bot with id ${target}. Try !help -id 0/1/2/3.`,
+            `No bot with id ${target}. Try !help -b 0/1/2/3.`,
           );
           return;
         }
@@ -114,12 +135,12 @@ registerCommand({
         ctx.sock,
         ctx.from,
         buildHelpText(botNumber, { isMentor: true }) +
-          "\n\nAdmin: !help -id <0-3> for any bot · !!help for personal (!!) commands",
+          "\n\nAdmin: !help -b <0-3> for any bot · !!help for personal (!!) commands",
       );
       return;
     }
 
-    // ── Non-admin: scoped to this chat's bot, no `-id`, rate-limited ──
+    // ── Non-admin: scoped to this chat's bot, no `-b`, rate-limited ──
     if (idMatch) {
       await sendBotReply(
         ctx.sock,
