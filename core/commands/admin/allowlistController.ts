@@ -168,7 +168,7 @@ registerCommand({
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !rm -g <group_id> | !rm -c <chat_id>\nUse !listgroups / !listchats to find the id.",
+        "Usage: !rm -gid <group_id> | !rm -cid <chat_id>\nUse !listgroups / !listchats to find the id.",
       );
       return;
     }
@@ -214,235 +214,145 @@ registerCommand({
   },
 });
 
-// ── EDIT GROUP (WITH DIALOG CONFIRMATION INTERCEPT) ──
+// ── EDIT (unified: !edit -gid <id> -b <n> | !edit -cid <id> -b <n>) ──
+// Reassigns the bot for an allowlisted group/chat (confirm via !YES).
 registerCommand({
-  name: "editgroup",
+  name: "edit",
   requiresAdmin: true,
   handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-gid\s+(\d+)\s+-b\s+(\d+)$/i);
-    if (!match) {
+    const joined = ctx.cmdArgs.join(" ").trim();
+    const g = joined.match(/-gid\s+(\d+)/i);
+    const c = joined.match(/-cid\s+(\d+)/i);
+    const b = joined.match(/-b\s+(\d+)/i);
+    if ((!g && !c) || (g && c) || !b) {
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !editgroup -gid <group_id> -b <bot_number>\nExample: !editgroup -gid 4 -b 2"
+        "Usage: !edit -gid <group_id> -b <0-3> | !edit -cid <chat_id> -b <0-3>\nExample: !edit -gid 4 -b 2",
       );
       return;
     }
+    const newBot = parseInt(b[1], 10);
 
-    const groupId = parseInt(match[1], 10);
-    const newBotNumber = parseInt(match[2], 10);
-
-    const groupEntry = groupConfig.getGroupEntryById(groupId);
-    if (!groupEntry) {
-      await sendBotReply(ctx.sock, ctx.from, `No group found in the allowlist with ID ${groupId}.`);
-      return;
-    }
-
-    if (groupEntry.botNumber === newBotNumber) {
-      await sendBotReply(ctx.sock, ctx.from, `Group is already using bot ${newBotNumber}.`);
-      return;
-    }
-
-    const groupName = await safeGetGroupName(ctx.sock, groupEntry.jid);
-
-    ctx.session.pendingEditGroup = {
-      id: groupId,
-      jid: groupEntry.jid,
-      botNumber: newBotNumber,
-    };
-
-    const oldBotLabel = botLabel(groupEntry.botNumber);
-    const newBotLabel = botLabel(newBotNumber);
-
-    await sendBotReply(
-      ctx.sock,
-      ctx.from,
-      `Are you sure you want to change Group ID: ${groupId} | Name: ${groupName} | JID: ${groupEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${groupEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
-    );
-
-    const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
-    await saveSession(sessionKey, ctx.session);
-  }
-});
-
-// ── EDIT CHAT (WITH DIALOG CONFIRMATION INTERCEPT) ──
-registerCommand({
-  name: "editchat",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-cid\s+(\d+)\s+-b\s+(\d+)$/i);
-    if (!match) {
+    if (g) {
+      const id = parseInt(g[1], 10);
+      const entry = groupConfig.getGroupEntryById(id);
+      if (!entry) {
+        await sendBotReply(ctx.sock, ctx.from, `No group found with ID ${id}.`);
+        return;
+      }
+      if (entry.botNumber === newBot) {
+        await sendBotReply(ctx.sock, ctx.from, `Group is already using bot ${newBot}.`);
+        return;
+      }
+      const groupName = await safeGetGroupName(ctx.sock, entry.jid);
+      ctx.session.pendingEditGroup = { id, jid: entry.jid, botNumber: newBot };
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: !editchat -cid <chat_id> -b <bot_number>\nExample: !editchat -cid 4 -b 2"
+        `Change Group ID: ${id} | Name: ${groupName} | JID: ${entry.jid} to Bot ${newBot} (${botLabel(newBot)}) from Bot ${entry.botNumber} (${botLabel(entry.botNumber)})?\n(Enter !YES to confirm)`,
       );
+      await saveSession(buildSessionKey(ctx.from, ctx.senderId), ctx.session);
       return;
     }
 
-    const chatId = parseInt(match[1], 10);
-    const newBotNumber = parseInt(match[2], 10);
-
-    const chatEntry = chatConfig.getChatEntryById(chatId);
-    if (!chatEntry) {
-      await sendBotReply(ctx.sock, ctx.from, `No chat found in the allowlist with ID ${chatId}.`);
+    const id = parseInt(c![1], 10);
+    const entry = chatConfig.getChatEntryById(id);
+    if (!entry) {
+      await sendBotReply(ctx.sock, ctx.from, `No chat found with ID ${id}.`);
       return;
     }
-
-    if (chatEntry.botNumber === newBotNumber) {
-      await sendBotReply(ctx.sock, ctx.from, `Chat is already using bot ${newBotNumber}.`);
+    if (entry.botNumber === newBot) {
+      await sendBotReply(ctx.sock, ctx.from, `Chat is already using bot ${newBot}.`);
       return;
     }
-
-    ctx.session.pendingEditChat = {
-      id: chatId,
-      jid: chatEntry.jid,
-      botNumber: newBotNumber,
-    };
-
-    const name = await safeGetContactName(chatEntry.jid);
-    const oldBotLabel = botLabel(chatEntry.botNumber);
-    const newBotLabel = botLabel(newBotNumber);
-
+    const name = await safeGetContactName(entry.jid);
+    ctx.session.pendingEditChat = { id, jid: entry.jid, botNumber: newBot };
     await sendBotReply(
       ctx.sock,
       ctx.from,
-      `Are you sure you want to change Chat ID: ${chatId} | Name: ${name} | JID: ${chatEntry.jid} to use Bot ${newBotNumber} (${newBotLabel}) instead of Bot ${chatEntry.botNumber} (${oldBotLabel})?\n(Enter !YES for confirmation)`
+      `Change Chat ID: ${id} | Name: ${name} | JID: ${entry.jid} to Bot ${newBot} (${botLabel(newBot)}) from Bot ${entry.botNumber} (${botLabel(entry.botNumber)})?\n(Enter !YES to confirm)`,
     );
-
-    const sessionKey = buildSessionKey(ctx.from, ctx.senderId);
-    await saveSession(sessionKey, ctx.session);
-  }
+    await saveSession(buildSessionKey(ctx.from, ctx.senderId), ctx.session);
+  },
 });
 
-// ── DISABLE GROUP ──
-registerCommand({
-  name: "disablegroup",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
-    if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !disablegroup -gid <group_id>\nExample: !disablegroup -gid 4");
-      return;
-    }
-
-    const groupId = parseInt(match[1], 10);
-    const groupEntry = groupConfig.getGroupEntryById(groupId);
-    if (!groupEntry) {
-      await sendBotReply(ctx.sock, ctx.from, `No group found in the allowlist with ID ${groupId}.`);
-      return;
-    }
-
-    const ok = await groupConfig.setGroupEnabled(groupId, false);
-    if (ok) {
-      try {
-        const { logAction } = await import("../../../storage/core/auditRepository");
-        await logAction(ctx.senderId || "unknown", "disable_group", String(groupId), groupEntry.jid, JSON.stringify({ enabled: false }));
-      } catch (e) {}
-      await sendBotReply(ctx.sock, ctx.from, `Disabled Group ID: ${groupId} | JID: ${groupEntry.jid}. The bot will not respond in this group.`);
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, `Failed to disable Group ID: ${groupId}.`);
-    }
+// ── ENABLE / DISABLE (unified: -gid <id> | -cid <id>) ──
+async function setAllowlistEnabled(ctx: any, enabled: boolean): Promise<void> {
+  const joined = ctx.cmdArgs.join(" ").trim();
+  const g = joined.match(/-gid\s+(\d+)/i);
+  const c = joined.match(/-cid\s+(\d+)/i);
+  const verb = enabled ? "enable" : "disable";
+  if ((!g && !c) || (g && c)) {
+    await sendBotReply(
+      ctx.sock,
+      ctx.from,
+      `Usage: !${verb} -gid <group_id> | !${verb} -cid <chat_id>`,
+    );
+    return;
   }
+
+  const logToggle = async (
+    action: string,
+    id: number,
+    jid: string,
+  ): Promise<void> => {
+    try {
+      const { logAction } = await import("../../../storage/core/auditRepository");
+      await logAction(ctx.senderId || "unknown", action, String(id), jid, JSON.stringify({ enabled }));
+    } catch {}
+  };
+
+  if (g) {
+    const id = parseInt(g[1], 10);
+    const entry = groupConfig.getGroupEntryById(id);
+    if (!entry) {
+      await sendBotReply(ctx.sock, ctx.from, `No group found with ID ${id}.`);
+      return;
+    }
+    const ok = await groupConfig.setGroupEnabled(id, enabled);
+    if (!ok) {
+      await sendBotReply(ctx.sock, ctx.from, `Failed to ${verb} Group ID: ${id}.`);
+      return;
+    }
+    await logToggle(`${verb}_group`, id, entry.jid);
+    await sendBotReply(
+      ctx.sock,
+      ctx.from,
+      `${enabled ? "Enabled" : "Disabled"} Group ID: ${id} | JID: ${entry.jid}.`,
+    );
+    return;
+  }
+
+  const id = parseInt(c![1], 10);
+  const entry = chatConfig.getChatEntryById(id);
+  if (!entry) {
+    await sendBotReply(ctx.sock, ctx.from, `No chat found with ID ${id}.`);
+    return;
+  }
+  const ok = await chatConfig.setChatEnabled(id, enabled);
+  if (!ok) {
+    await sendBotReply(ctx.sock, ctx.from, `Failed to ${verb} Chat ID: ${id}.`);
+    return;
+  }
+  await logToggle(`${verb}_chat`, id, entry.jid);
+  await sendBotReply(
+    ctx.sock,
+    ctx.from,
+    `${enabled ? "Enabled" : "Disabled"} Chat ID: ${id} | JID: ${entry.jid}.`,
+  );
+}
+
+registerCommand({
+  name: "disable",
+  requiresAdmin: true,
+  handler: (ctx) => setAllowlistEnabled(ctx, false),
 });
 
-// ── DISABLE CHAT ──
 registerCommand({
-  name: "disablechat",
+  name: "enable",
   requiresAdmin: true,
-  handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
-    if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !disablechat -cid <chat_id>\nExample: !disablechat -cid 4");
-      return;
-    }
-
-    const chatId = parseInt(match[1], 10);
-    const chatEntry = chatConfig.getChatEntryById(chatId);
-    if (!chatEntry) {
-      await sendBotReply(ctx.sock, ctx.from, `No chat found in the allowlist with ID ${chatId}.`);
-      return;
-    }
-
-    const ok = await chatConfig.setChatEnabled(chatId, false);
-    if (ok) {
-      try {
-        const { logAction } = await import("../../../storage/core/auditRepository");
-        await logAction(ctx.senderId || "unknown", "disable_chat", String(chatId), chatEntry.jid, JSON.stringify({ enabled: false }));
-      } catch (e) {}
-      await sendBotReply(ctx.sock, ctx.from, `Disabled Chat ID: ${chatId} | JID: ${chatEntry.jid}. The bot will not respond in this chat.`);
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, `Failed to disable Chat ID: ${chatId}.`);
-    }
-  }
-});
-
-// ── ENABLE GROUP ──
-registerCommand({
-  name: "enablegroup",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-gid\s+(\d+)$/i);
-    if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !enablegroup -gid <group_id>\nExample: !enablegroup -gid 4");
-      return;
-    }
-
-    const groupId = parseInt(match[1], 10);
-    const groupEntry = groupConfig.getGroupEntryById(groupId);
-    if (!groupEntry) {
-      await sendBotReply(ctx.sock, ctx.from, `No group found in the allowlist with ID ${groupId}.`);
-      return;
-    }
-
-    const ok = await groupConfig.setGroupEnabled(groupId, true);
-    if (ok) {
-      try {
-        const { logAction } = await import("../../../storage/core/auditRepository");
-        await logAction(ctx.senderId || "unknown", "enable_group", String(groupId), groupEntry.jid, JSON.stringify({ enabled: true }));
-      } catch (e) {}
-      await sendBotReply(ctx.sock, ctx.from, `Enabled Group ID: ${groupId} | JID: ${groupEntry.jid}. The bot is now active in this group.`);
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, `Failed to enable Group ID: ${groupId}.`);
-    }
-  }
-});
-
-// ── ENABLE CHAT ──
-registerCommand({
-  name: "enablechat",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    const rawArgs = ctx.cmdArgs.join(" ").trim();
-    const match = rawArgs.match(/^-cid\s+(\d+)$/i);
-    if (!match) {
-      await sendBotReply(ctx.sock, ctx.from, "Usage: !enablechat -cid <chat_id>\nExample: !enablechat -cid 4");
-      return;
-    }
-
-    const chatId = parseInt(match[1], 10);
-    const chatEntry = chatConfig.getChatEntryById(chatId);
-    if (!chatEntry) {
-      await sendBotReply(ctx.sock, ctx.from, `No chat found in the allowlist with ID ${chatId}.`);
-      return;
-    }
-
-    const ok = await chatConfig.setChatEnabled(chatId, true);
-    if (ok) {
-      try {
-        const { logAction } = await import("../../../storage/core/auditRepository");
-        await logAction(ctx.senderId || "unknown", "enable_chat", String(chatId), chatEntry.jid, JSON.stringify({ enabled: true }));
-      } catch (e) {}
-      await sendBotReply(ctx.sock, ctx.from, `Enabled Chat ID: ${chatId} | JID: ${chatEntry.jid}. The bot is now active in this chat.`);
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, `Failed to enable Chat ID: ${chatId}.`);
-    }
-  }
+  handler: (ctx) => setAllowlistEnabled(ctx, true),
 });
 
 // ── FIND GROUPS ──
@@ -610,18 +520,5 @@ registerCommand({
   handler: async (ctx) => {
     const registry = (await import("../commandRegistry")).dispatchCommand;
     await registry({ ...ctx, cmdName: "findchats" });
-  }
-});
-
-// ── DEPRECATED CHANGEBOT ──
-registerCommand({
-  name: "changebot",
-  requiresAdmin: true,
-  handler: async (ctx) => {
-    await sendBotReply(
-      ctx.sock,
-      ctx.from,
-      "The !changebot command has been deprecated. Please use !editgroup or !editchat instead.\nExample: !editgroup -id 4 -b 2"
-    );
   }
 });
