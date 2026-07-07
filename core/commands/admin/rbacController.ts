@@ -1,269 +1,166 @@
 import { registerCommand } from "../commandRegistry";
 import groupConfig from "../../../config/groupAllowlist";
 import chatConfig from "../../../config/chatAllowlist";
-import { sendBotReply, buildSessionKey } from "../../../bot";
+import { sendBotReply } from "../../../bot";
 import { normalizeJid, isAdminAction } from "../../../security/rbac";
-import { saveSession } from "../../state";
 
-// ── MANAGE ROLE ──
+// Cooldown on bulk (-all) role changes to prevent mass spam/abuse.
+const BULK_COOLDOWN_SEC = Number(process.env.MENTOR_MANAGE_COOLDOWN_SEC) || 300;
+const BULK_CAP = Number(process.env.MENTOR_BULK_CAP) || 200;
+
+const USAGE = [
+  "Usage (DKB group):",
+  "• !manage mentor -l — list everyone with the role",
+  "• !manage mentor -all — grant to everyone in THIS group",
+  "• !manage mentor -all -rm — remove from everyone in THIS group",
+  "• !manage mentor -jid <phone> — grant to one person",
+  "• !manage mentor -jid <phone> -rm — remove from one person",
+].join("\n");
+
+/** Resolves a group participant to their best (phone) JID + any LID pair. */
+function participantJids(p: any): { target: string | null; lid: string | null; phone: string | null } {
+  const pid = p?.id ? normalizeJid(p.id) : null;
+  const plid = p?.lid ? normalizeJid(p.lid) : null;
+  const ppn = p?.phoneNumber ? normalizeJid(p.phoneNumber) : null;
+  const phone =
+    pid && pid.endsWith("@s.whatsapp.net")
+      ? pid
+      : ppn && ppn.endsWith("@s.whatsapp.net")
+        ? ppn
+        : null;
+  const lid = (pid && pid.endsWith("@lid") ? pid : plid) || null;
+  return { target: phone || pid || plid || null, lid, phone: phone || null };
+}
+
+/** Parses a `-jid` argument (phone number or JID/LID) into a canonical JID. */
+function parseJidArg(input: string): string | null {
+  const inp = (input || "").trim();
+  if (inp.includes("@")) {
+    const n = normalizeJid(inp);
+    if (n && (n.endsWith("@s.whatsapp.net") || n.endsWith("@lid"))) return n;
+  }
+  const m = inp.match(/^\+?(\d{7,15})$/);
+  if (m) return `${m[1]}@s.whatsapp.net`;
+  return null;
+}
+
+// ── MANAGE ROLES (mentor) ──
+// Bulk/manual grant + removal of the mentor role. Bot 2 (DKB) only.
 registerCommand({
   name: "manage",
   handler: async (ctx) => {
-    let botNumber = 0;
-    if (ctx.from?.endsWith("@g.us")) {
-      const groupBot = groupConfig.getGroupBot(ctx.from);
-      botNumber = groupBot?.botNumber || 0;
-    } else {
-      const chatBot = chatConfig.getChatBot(ctx.from);
-      botNumber = chatBot?.botNumber || 0;
-    }
-
+    const botNumber = ctx.from?.endsWith("@g.us")
+      ? groupConfig.getGroupBot(ctx.from)?.botNumber || 0
+      : chatConfig.getChatBot(ctx.from)?.botNumber || 0;
     if (botNumber !== 2) {
-      await sendBotReply(ctx.sock, ctx.from, "Error: This command is only available for Bot 2 (DKB).");
+      await sendBotReply(ctx.sock, ctx.from, "This command is only available for Bot 2 (DKB).");
       return;
     }
 
-    const isManageAdmin = isAdminAction(ctx.msg, ctx.senderId);
-    const { userHasPermission } = await import("../../../storage/core/rbacRepository");
-    const isManageAuthorized = isManageAdmin || (ctx.senderId && await userHasPermission(ctx.senderId, "role.manage"));
-
-    if (!isManageAuthorized) {
-      await sendBotReply(ctx.sock, ctx.from, "Unauthorized: you need admin privileges or the role.manage permission to use this command.");
+    const isAdmin = isAdminAction(ctx.msg, ctx.senderId);
+    const rbac = await import("../../../storage/core/rbacRepository");
+    const authorized = isAdmin || (ctx.senderId && (await rbac.userHasPermission(ctx.senderId, "role.manage")));
+    if (!authorized) {
+      await sendBotReply(ctx.sock, ctx.from, "Unauthorized: admin privileges or the role.manage permission are required.");
       return;
     }
 
-    const arg1 = ctx.cmdArgs[0];
-    const arg2 = ctx.cmdArgs[1];
+    const role = (ctx.cmdArgs[0] || "").trim().toLowerCase();
+    if (!role) {
+      await sendBotReply(ctx.sock, ctx.from, USAGE);
+      return;
+    }
+    const flags = ctx.cmdArgs.slice(1);
+    const lower = flags.map((f) => f.toLowerCase());
+    const isRemove = lower.includes("-rm");
+    const wantAll = lower.includes("-all");
+    const wantList = lower.includes("-l");
+    const jidIdx = lower.indexOf("-jid");
+    const jidArg = jidIdx !== -1 ? flags[jidIdx + 1] : undefined;
 
-    if (!arg1 || !arg2) {
+    // ── LIST ── (admin or role.manage; read-only)
+    if (wantList) {
+      const users = await rbac.getUsersWithRole(role);
+      if (!users.length) {
+        await sendBotReply(ctx.sock, ctx.from, `No users have the role "${role}".`);
+        return;
+      }
+      const lines = users
+        .map((j) => (j.endsWith("@lid") ? `${j.split("@")[0]} (LID)` : `+${j.split("@")[0]}`))
+        .join("\n");
+      await sendBotReply(ctx.sock, ctx.from, `Users with role "${role}" (${users.length}):\n${lines}`);
+      return;
+    }
+
+    // Privilege guard: assigning/removing a role that carries admin-level
+    // permissions (e.g. mentor.manage) is owner-only — never propagatable via
+    // a role.manage holder.
+    if (!isAdmin && (await rbac.roleHasPrivilegedPermission(role))) {
+      await sendBotReply(ctx.sock, ctx.from, `Only the owner can manage the privileged role "${role}".`);
+      return;
+    }
+
+    // ── BULK (-all) ── group only, cooldown-guarded
+    if (wantAll) {
+      if (!ctx.from?.endsWith("@g.us")) {
+        await sendBotReply(ctx.sock, ctx.from, "Use -all inside a group.");
+        return;
+      }
+      try {
+        const { redis } = await import("../../../storage/redisClient");
+        const cd = await redis.set(`manage:cd:${ctx.senderId}`, "1", "EX", BULK_COOLDOWN_SEC, "NX");
+        if (cd !== "OK") {
+          await sendBotReply(ctx.sock, ctx.from, `Please wait a few minutes before another bulk role change.`);
+          return;
+        }
+      } catch {
+        /* if Redis is down, proceed without the cooldown rather than block ops */
+      }
+
+      let meta: any;
+      try {
+        meta = await ctx.sock.groupMetadata(ctx.from);
+      } catch {
+        await sendBotReply(ctx.sock, ctx.from, "Couldn't read this group's members.");
+        return;
+      }
+      const participants = (meta?.participants || []).slice(0, BULK_CAP);
+      let done = 0;
+      for (const p of participants) {
+        const { target, lid, phone } = participantJids(p);
+        if (!target) continue;
+        if (lid && phone) await rbac.storeLidPhoneMapping(lid, phone).catch(() => {});
+        const ok = isRemove
+          ? await rbac.revokeManagedRole(target, role)
+          : await rbac.addManagedRole(target, role);
+        if (ok) done++;
+      }
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Usage: \n!manage <work> <+phone_number>\n!manage <work> -l\n!manage <+phone_number> -p\nExample: !manage mentor +919902849280\nExample: !manage mentor -l\nExample: !manage +919902849280 -p"
+        `${isRemove ? "Removed" : "Assigned"} role "${role}" ${isRemove ? "from" : "to"} ${done} of ${participants.length} member(s).`,
       );
       return;
     }
 
-    if (arg2 === "-p") {
-      let targetJid = "";
-      const inputLabel = arg1.trim();
-
-      if (inputLabel.includes("@")) {
-        const normalized = normalizeJid(inputLabel);
-        if (normalized && (normalized.endsWith("@s.whatsapp.net") || normalized.endsWith("@lid"))) {
-          targetJid = normalized;
-        }
+    // ── SINGLE (-jid <phone|jid>) ──
+    if (jidArg) {
+      const target = parseJidArg(jidArg);
+      if (!target) {
+        await sendBotReply(ctx.sock, ctx.from, "Provide -jid <phone number or JID>. Example: !manage mentor -jid +919902849280");
+        return;
       }
-
-      if (!targetJid && /^\d{7,20}$/.test(inputLabel)) {
-        targetJid = `${inputLabel}@s.whatsapp.net`;
-      }
-
-      if (!targetJid) {
-        const numberMatch = inputLabel.match(/^\+(\d{7,15})$/);
-        if (!numberMatch) {
-          await sendBotReply(
-            ctx.sock,
-            ctx.from,
-            "Error: Target must be a JID/LID (e.g. 123@s.whatsapp.net, 456@lid) or a phone number starting with + (e.g. +919902849280)."
-          );
-          return;
-        }
-        const rawPhone = numberMatch[1];
-        targetJid = `${rawPhone}@s.whatsapp.net`;
-        try {
-          const waResult = await ctx.sock.onWhatsApp(rawPhone);
-          if (waResult && waResult.length > 0 && waResult[0].exists) {
-            targetJid = waResult[0].jid;
-          } else {
-            await sendBotReply(ctx.sock, ctx.from, `Number +${rawPhone} is not registered on WhatsApp.`);
-            return;
-          }
-        } catch(err) {
-          console.error("onWhatsApp error:", err);
-        }
-      }
-
-      let effectiveQueryJid = targetJid;
-      if (targetJid.endsWith("@lid")) {
-        try {
-          const { resolvePhoneJidFromLid } = await import("../../../storage/core/rbacRepository");
-          const resolved = await resolvePhoneJidFromLid(targetJid);
-          if (resolved) effectiveQueryJid = resolved;
-        } catch (_) {}
-      }
-
-      try {
-        const { getUserRoles } = await import("../../../storage/core/rbacRepository");
-        let roles = await getUserRoles(effectiveQueryJid);
-        if (roles.length === 0 && effectiveQueryJid !== targetJid) {
-          roles = await getUserRoles(targetJid);
-        }
-
-        if (roles.length === 0) {
-          await ctx.sock.sendMessage(targetJid, {
-            text: "You currently have no special roles assigned.",
-          });
-        } else if (roles.length === 1) {
-          await ctx.sock.sendMessage(targetJid, {
-            text: `You have received the role of ${roles[0]}`
-          });
-        } else {
-          const formattedRoles = roles.slice(0, -1).join(", ") + " & " + roles[roles.length - 1];
-          await ctx.sock.sendMessage(targetJid, {
-            text: `You have received the role of ${roles[roles.length - 1]}! You now have ${formattedRoles}`
-          });
-        }
-        await sendBotReply(ctx.sock, ctx.from, `Successfully sent role notification check to ${arg1}.`);
-      } catch (e) {
-        await sendBotReply(ctx.sock, ctx.from, `Failed to send role notification to ${arg1}.`);
-      }
-      return;
-    }
-
-    const normalizedWork = arg1.trim().toLowerCase();
-
-    if (arg2 === "-l") {
-      const { getUsersWithRole } = await import("../../../storage/core/rbacRepository");
-      const users = await getUsersWithRole(normalizedWork);
-      if (users.length === 0) {
-        await sendBotReply(ctx.sock, ctx.from, `No users found with role "${normalizedWork}".`);
+      const ok = isRemove
+        ? await rbac.revokeManagedRole(target, role)
+        : await rbac.addManagedRole(target, role);
+      if (ok) {
+        await sendBotReply(ctx.sock, ctx.from, `${isRemove ? "Removed" : "Assigned"} role "${role}" ${isRemove ? "from" : "to"} ${jidArg}.`);
       } else {
-        const formattedUsers = users
-          .map((j) => {
-            if (j.endsWith("@lid")) {
-              return `${j.split("@")[0]} (LID)`;
-            }
-            return `+${j.split("@")[0]}`;
-          })
-          .join("\n");
-        await sendBotReply(ctx.sock, ctx.from, `Users with role "${normalizedWork}":\n${formattedUsers}`);
+        await sendBotReply(ctx.sock, ctx.from, `Failed. Ensure the database is healthy and the role "${role}" exists.`);
       }
       return;
     }
 
-    let targetJid = "";
-    const inputLabel = arg2.trim();
-
-    if (inputLabel.includes("@")) {
-      const normalized = normalizeJid(inputLabel);
-      if (normalized && (normalized.endsWith("@s.whatsapp.net") || normalized.endsWith("@lid"))) {
-        targetJid = normalized;
-      }
-    }
-
-    if (!targetJid && /^\d{7,20}$/.test(inputLabel)) {
-      targetJid = `${inputLabel}@s.whatsapp.net`;
-    }
-
-    if (!targetJid) {
-      const numberMatch = inputLabel.match(/^\+(\d{7,15})$/);
-      if (!numberMatch) {
-        await sendBotReply(
-          ctx.sock,
-          ctx.from,
-          "Error: Target must be a JID/LID (e.g. 123@s.whatsapp.net, 456@lid) or a phone number starting with + (e.g. +919902849280)."
-        );
-        return;
-      }
-      const rawPhone = numberMatch[1];
-      targetJid = `${rawPhone}@s.whatsapp.net`;
-
-      try {
-        const waResult = await ctx.sock.onWhatsApp(rawPhone);
-        if (waResult && waResult.length > 0 && waResult[0].exists) {
-          targetJid = waResult[0].jid;
-        } else {
-          await sendBotReply(ctx.sock, ctx.from, `Warning: Number +${rawPhone} does not appear to be registered on WhatsApp. Cannot assign role.`);
-          return;
-        }
-      } catch(err) {
-        console.error("onWhatsApp error:", err);
-      }
-    }
-
-    // Owner-only guard: a non-admin acting via the role.manage permission may
-    // assign ordinary roles, but must never assign a role that carries
-    // admin-level permissions (privilege propagation). Only hard-admin passes.
-    if (!isManageAdmin) {
-      const { roleHasPrivilegedPermission } = await import("../../../storage/core/rbacRepository");
-      if (await roleHasPrivilegedPermission(normalizedWork)) {
-        await sendBotReply(
-          ctx.sock,
-          ctx.from,
-          `Unauthorized: only the owner can assign the privileged role "${normalizedWork}".`,
-        );
-        return;
-      }
-    }
-
-    const { addManagedRole } = await import("../../../storage/core/rbacRepository");
-    const { storeLidPhoneMapping } = await import("../../../storage/core/rbacRepository");
-    let resolvedPhoneJid: string | null = null;
-    let resolvedLid: string | null = null;
-
-    if (targetJid.endsWith("@lid")) {
-      resolvedLid = targetJid;
-      try {
-        const { resolvePhoneJidFromLid } = await import("../../../storage/core/rbacRepository");
-        resolvedPhoneJid = await resolvePhoneJidFromLid(resolvedLid);
-      } catch (_) {}
-
-      if (!resolvedPhoneJid && ctx.from?.endsWith("@g.us")) {
-        try {
-          const meta = await ctx.sock.groupMetadata(ctx.from);
-          const match = meta.participants.find((p: any) => {
-            const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
-            const plid = p.lid ? (normalizeJid(p.lid) ?? "").toLowerCase() : "";
-            const targetLower = resolvedLid!.toLowerCase();
-            return pid === targetLower || plid === targetLower;
-          });
-          if (match) {
-            const pid = match.id ? normalizeJid(match.id) : null;
-            const ppn = match.phoneNumber ? normalizeJid(match.phoneNumber) : null;
-            if (pid && pid.endsWith("@s.whatsapp.net")) {
-              resolvedPhoneJid = pid;
-            } else if (ppn && ppn.endsWith("@s.whatsapp.net")) {
-              resolvedPhoneJid = ppn;
-            }
-          }
-        } catch (_) {}
-      }
-    } else if (targetJid.endsWith("@s.whatsapp.net")) {
-      resolvedPhoneJid = targetJid;
-      if (ctx.from?.endsWith("@g.us")) {
-        try {
-          const meta = await ctx.sock.groupMetadata(ctx.from);
-          const match = meta.participants.find((p: any) => {
-            const pid = p.id ? (normalizeJid(p.id) ?? "").toLowerCase() : "";
-            const ppn = p.phoneNumber ? (normalizeJid(p.phoneNumber) ?? "").toLowerCase() : "";
-            const targetLower = resolvedPhoneJid!.toLowerCase();
-            return pid === targetLower || ppn === targetLower;
-          });
-          if (match) {
-            const pid = match.id ? normalizeJid(match.id) : null;
-            const plid = match.lid ? normalizeJid(match.lid) : null;
-            if (pid && pid.endsWith("@lid")) {
-              resolvedLid = pid;
-            } else if (plid && plid.endsWith("@lid")) {
-              resolvedLid = plid;
-            }
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (resolvedLid && resolvedPhoneJid) {
-      await storeLidPhoneMapping(resolvedLid, resolvedPhoneJid);
-    }
-
-    const roleJid = resolvedPhoneJid || targetJid;
-    const ok = await addManagedRole(roleJid, normalizedWork);
-
-    if (ok) {
-      await sendBotReply(ctx.sock, ctx.from, `Successfully assigned role "${normalizedWork}" to ${arg2}.`);
-    } else {
-      await sendBotReply(ctx.sock, ctx.from, "Failed to assign role. Ensure the database connection is healthy and the role is valid.");
-    }
-  }
+    await sendBotReply(ctx.sock, ctx.from, USAGE);
+  },
 });
