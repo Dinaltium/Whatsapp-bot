@@ -1,0 +1,15 @@
+{
+  "name": "laptop-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Subscribes to the bot's Redis pub/sub channel and shows a Windows toast when the auto-responder replies on your behalf.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "node-notifier": "^10.0.1"
+  }
+}
