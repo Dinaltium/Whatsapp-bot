@@ -3,16 +3,15 @@
  * shows a native Windows toast when the generic auto-responder replies for
  * you on WhatsApp. Idle process — near-zero CPU/RAM between events.
  *
- * Connect via an SSH tunnel to the VPS (see README.md) — never point this at
- * an internet-exposed Redis port.
+ * Connects directly to Upstash Redis over TLS (Upstash is already a managed,
+ * password-protected, internet-facing endpoint — no SSH tunnel needed). If you
+ * later move to a self-hosted VPS Redis instead, tunnel it (see README) and
+ * set REDIS_TLS=false.
  */
 require("dotenv").config();
 const Redis = require("ioredis");
 const notifier = require("node-notifier");
 
-const HOST = process.env.REDIS_HOST || "127.0.0.1";
-const PORT = Number(process.env.REDIS_PORT || 6380);
-const PASSWORD = process.env.REDIS_PASSWORD || undefined;
 const CHANNEL = process.env.NOTIFY_CHANNEL || "laptop:notify";
 const MIN_SEVERITIES = new Set(
   (process.env.MIN_SEVERITIES || "low,medium,high")
@@ -23,14 +22,21 @@ const MIN_SEVERITIES = new Set(
 
 const SEVERITY_LABEL = { high: "🔴 HIGH", medium: "🟡 Medium", low: "🟢 Low" };
 
-const redis = new Redis({
-  host: HOST,
-  port: PORT,
-  password: PASSWORD,
-  retryStrategy: (times) => Math.min(times * 500, 5000),
-});
+// Prefer a full REDIS_URL (rediss://default:PASS@host:6379) if given; else
+// build the connection from discrete host/port/password/tls vars.
+const redis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL, {
+      retryStrategy: (times) => Math.min(times * 500, 5000),
+    })
+  : new Redis({
+      host: process.env.REDIS_HOST || "127.0.0.1",
+      port: Number(process.env.REDIS_PORT || 6379),
+      password: process.env.REDIS_PASSWORD || undefined,
+      tls: (process.env.REDIS_TLS ?? "true").toLowerCase() !== "false" ? {} : undefined,
+      retryStrategy: (times) => Math.min(times * 500, 5000),
+    });
 
-redis.on("connect", () => console.log(`[notifier] connected to ${HOST}:${PORT}`));
+redis.on("connect", () => console.log("[notifier] connected to Redis"));
 redis.on("error", (err) => console.error("[notifier] redis error:", err.message));
 
 redis.subscribe(CHANNEL, (err) => {
