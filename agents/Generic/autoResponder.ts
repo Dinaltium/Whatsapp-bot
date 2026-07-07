@@ -16,7 +16,7 @@
  * !reset and !help are always allowed and never counted.
  */
 import { getSession, saveSession } from "../../core/state";
-import { buildSessionKey, sendBotReply, GROQ_MODEL } from "../../bot";
+import { buildSessionKey, sendBotReply, safeGetContactName, GROQ_MODEL } from "../../bot";
 import chatConfig from "../../config/chatAllowlist";
 import { getGroqReply } from "../../ai/groqClient";
 import { GENERIC_SYSTEM_PROMPT, GENERIC_HELP_TEXT } from "./intro";
@@ -108,6 +108,32 @@ function footer(remaining: number): string {
 
 function cannedGreeting(): string {
   return `Hey! ${OWNER_NAME} isn't available right now — he'll get back to you soon. (I'm his auto-reply bot.)`;
+}
+
+/**
+ * Fire-and-forget: classify urgency + push a laptop toast for a message the
+ * owner didn't personally see. Never awaited by the reply path — a slow or
+ * failed classification/publish must not delay or break the WhatsApp reply.
+ */
+function notifyOwner(from: string, senderId: string, text: string, groqApiKey: string | undefined): void {
+  (async () => {
+    try {
+      const { classifySeverity } = await import("../../services/notify/severityClassifier");
+      const { publishLaptopNotification } = await import("../../services/notify/laptopNotify");
+      const [senderName, { severity, reason }] = await Promise.all([
+        safeGetContactName(senderId || from),
+        classifySeverity(text, groqApiKey),
+      ]);
+      await publishLaptopNotification({
+        senderName,
+        preview: text.slice(0, 200),
+        severity,
+        reason,
+      });
+    } catch (err) {
+      console.warn("[Generic] notifyOwner failed:", err);
+    }
+  })();
 }
 
 async function genericReply(
@@ -213,11 +239,13 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
       const reply = await genericReply(session, action.userMsg, groqApiKey);
       const n = await incrCount(jidKey);
       await sendBotReply(sock, from, reply + footer(DAILY_LIMIT - n));
+      notifyOwner(from, senderId, action.userMsg, groqApiKey);
       return true;
     }
     case "greet": {
       const n = await incrCount(jidKey);
       await sendBotReply(sock, from, cannedGreeting() + footer(DAILY_LIMIT - n));
+      notifyOwner(from, senderId, text, groqApiKey);
       return true;
     }
   }
