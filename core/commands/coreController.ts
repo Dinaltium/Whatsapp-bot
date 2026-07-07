@@ -7,15 +7,15 @@ import { saveSession } from "../state";
 import { buildSessionKey } from "../../bot";
 
 // Management commands shown to the owner on plain `!help` (bot command sets are
-// only shown with `!help -b <n>`).
+// only shown with `!help -bid <n>`).
 const ADMIN_HELP_TEXT = [
   "Admin commands (owner only):",
   "",
-  "Allowlist (no-id cmds use -g/-c · id cmds use -gid/-cid):",
-  "• !add -g|-c [jid] [-b <0-3>] — allow THIS (or a given) group/chat; default Bot 0",
-  "• !rm -gid <id> | -cid <id> — remove from allowlist (confirm with !YES)",
-  "• !edit -gid <id> -b <n> | -cid <id> -b <n> — change assigned bot",
-  "• !enable / !disable -gid <id> | -cid <id> — toggle a group/chat",
+  "Allowlist (run in the target chat/group, or target by id):",
+  "• !add [-g|-c] [jid] [-bid <0-3>] — allow THIS (or a given) chat/group; default Bot 1",
+  "• !rm — remove THIS chat/group (or -gid/-cid <id>); confirm with !YES",
+  "• !edit -bid <n> — reassign THIS chat/group's bot (or -gid/-cid <id> -bid <n>)",
+  "• !enable / !disable — toggle THIS chat/group (or -gid/-cid <id>)",
   "• !listgroups · !listchats — list allowlisted groups/chats",
   "• !findgroups [-f <q>] [-p] · !findchats — search joined groups / known chats",
   "",
@@ -25,7 +25,7 @@ const ADMIN_HELP_TEXT = [
   "• !neonping · !neonconnect — database diagnostics",
   "",
   "Info:",
-  "• !help -b <0-3> — a specific bot's user commands",
+  "• !help -bid <0-3> — a specific bot's user commands",
   "• !!help — personal (!!) commands",
 ].join("\n");
 
@@ -131,10 +131,10 @@ registerCommand({
       botNumber = chatConfig.getChatBot(ctx.from)?.botNumber ?? 0;
     }
 
-    // Bot selector flag: `-b <n>` or `-bot <n>`.
-    const idMatch = ctx.cmdArgs.join(" ").match(/^-b(?:ot)?\s+(\d+)$/i);
+    // Bot selector flag: `-bid <n>`.
+    const idMatch = ctx.cmdArgs.join(" ").match(/^-bid\s+(\d+)$/i);
 
-    // ── Owner: unrestricted, `-b` points at any bot ──
+    // ── Owner: unrestricted, `-bid` points at any bot ──
     if (isAdmin) {
       if (idMatch) {
         const target = parseInt(idMatch[1], 10);
@@ -143,7 +143,7 @@ registerCommand({
           await sendBotReply(
             ctx.sock,
             ctx.from,
-            `No bot with id ${target}. Try !help -b 0/1/2/3.`,
+            `No bot with id ${target}. Try !help -bid 0/1/2/3.`,
           );
           return;
         }
@@ -155,12 +155,12 @@ registerCommand({
         return;
       }
       // Plain !help for the owner → management commands (not a bot's command
-      // set; those need -b). PATCHES Fix #1 (#15/#20).
+      // set; those need -bid). PATCHES Fix #1 (#15/#20).
       await sendBotReply(ctx.sock, ctx.from, ADMIN_HELP_TEXT);
       return;
     }
 
-    // ── Non-admin: scoped to this chat's bot, no `-b`, rate-limited ──
+    // ── Non-admin: scoped to this chat's bot, no `-bid`, rate-limited ──
     if (idMatch) {
       await sendBotReply(
         ctx.sock,
