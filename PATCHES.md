@@ -23,5 +23,43 @@ We will change addchat or addgroup to !add -g/-c, so basically unifying the proc
 Using !add -c/-g in a chat or group respectively should automatically fetch the jid of the group and add it to the list but gets bot 0 unless -b is used to specify in the command. Ex: !add -c -b 2; adds bot 2 in the chat I used this message but if I specify the jid like in this case !add -c 136249347932495@lid -b 2 (the jid is wrong so don't worry); then it will add that jid to the list even if I use it in any chat. Otherwise just the chat or group I am in, it gets added. (Improvement)
 We will remove bot headers completely from every bot like this one from DKB: DK-Bot-692. (Fix)
 
-
 Fix #2
+
+General bot should be available as default bot to every user messaging me (those in my contacts) (improvement)
+General bot should be able to read any messages that comes when I am offline and send a notification to my laptop (feature)
+General bot messages even when I am online in WhatsApp (30seconds have not passed) but not in the tab, it still somehow messages (Bug)
+General bot usage instruction should be modified; replace !<message> with just !message because I got my friend who messaged me in the morning failing to use his IQ to use the command correctly. Here is how he used it:
+
+---
+
+!<remind him to send me the necessary details regarding the llp registration which includes
+[2:18 pm, 26/06/2026] Prateek D Shriyan: PAN, Aadhaar of all 3 partners
+Passport-size photos
+Email IDs and mobile numbers
+Address proof of all partners
+[2:19 pm, 26/06/2026] Prateek D Shriyan: Obtain DSCs (Digital Signature Certificates) >
+
+---
+
+I'm just the owner's auto-reply bot, I won't be able to help with that, the owner will get back to you when they return. Hope you're doing well!
+
+## _Beep bop — I'm the owner's bot. Send !<message> to talk to me. 1 reply left today._
+
+## !<fuck off then >
+
+So for guys like him better if we improve the text to show usage (Improvement)
+General bot no longer needs any assignment as 0 or anything, rather it comes defaulted to any one including chats that already have a bot assigned to them. Which means default will be 0 for every chat but none for group. When I add the chat or group to allow list, default is 1 if I don't mention any bot id (Improvement)
+The command !add -c/-g -b should be modified. If I am in a chat like, then by default have the bot know I am in a chat which doesn't require me to use -c/-g and I could directly use !add -b 2 or something like that. I can also do !add -c/-g with or without jid but for simplicity if possible, just doing !add should be enough (even without assigning a bot) (Improvement)
+Improve the bot commands for !help command every time we make change. Plus simplify but to the point. (Improvement)
+!rm command should also work in the chat or group I am using it. If I am in the group and use just !rm, it should know the group jid and what bot its currently using and remove that from the list. (Improvement)
+Same for !edit, !enable, !disable, if I am in the chat or group and calling this command, I can use it directly without using !cid or !gid and use other parameters if required instead. (Improvement)
+Change any commands that use -b to using only -bid to make it easier and consistent. No backwards compatibility.
+Mentor role management used by DKB will go through some clean changes:
+
+1. Mentor role can be manually added or bulk added or removed. The current !manage needs to be completely changed from how it is to just doing like this: !manage mentor -all, will give everyone mentor role if I use it in the group, !manage mentor -l will list everyone who got the mentor role, !manage mentor -all -rm will remove the mentor role from everyone if used in group, !manage mentor -jid phone_number will add the specific person to have the mentor role.
+2. Mentor role should have a cooldown to prevent mass spam and usage
+3. Mentor role only gets to remove or add or edit mentors and nothing else to do. Aside from having that, they can do other things unless blocked from doing it.
+   So just look into this (Feature)
+   The desktop messaging should use less emojis and more professional wording. Even if the person in the chat has bot access like 1/2/3, they still can use 0 with limitation and instead of keeping it 3 messages per day, we will keep it 5 messages per 3-4hrs. We will also make sure that the general bot doesn't repeat twice for the message. General bot can also read non !message command chats but they can't respond to any unless this is !message used but I think instead of setting !message like !chat some message.
+
+#Fix 3

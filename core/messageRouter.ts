@@ -268,6 +268,7 @@ async function processInboundMessage(
         text,
         isAdmin: isAdminSender(msg, senderId),
         groqApiKey: GROQ_API_KEY,
+        msgId: msg.key?.id || undefined,
       });
       if (handledGeneric) return;
     } catch (err) {
