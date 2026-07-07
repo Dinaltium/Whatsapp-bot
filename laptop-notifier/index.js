@@ -45,7 +45,50 @@ redis.subscribe(CHANNEL, (err) => {
     process.exit(1);
   }
   console.log(`[notifier] listening on "${CHANNEL}" — waiting for messages...`);
+  startPresence();
 });
+
+// ── Desk presence ──────────────────────────────────────────────────────────
+// Reports "owner is at the computer" (based on OS idle time) so the bot doesn't
+// auto-reply while you're online-but-idle. Uses a SECOND connection because a
+// subscribed ioredis connection can't issue other commands.
+const DESK_PRESENCE = (process.env.DESK_PRESENCE ?? "true").toLowerCase() !== "false";
+const IDLE_THRESHOLD_SEC = Number(process.env.IDLE_THRESHOLD_SEC || 120);
+const DESK_PING_SEC = Number(process.env.DESK_PING_SEC || 30);
+
+let idleLib = null;
+if (DESK_PRESENCE) {
+  try {
+    idleLib = require("desktop-idle");
+  } catch {
+    console.warn(
+      "[notifier] desktop-idle not installed — desk presence off. Run `npm install` (needs build tools). The bot falls back to send-based presence.",
+    );
+  }
+}
+
+const pub = redis.duplicate();
+pub.on("error", () => {});
+
+function startPresence() {
+  if (!DESK_PRESENCE || !idleLib) return;
+  const tick = async () => {
+    try {
+      if (idleLib.getIdleTime() < IDLE_THRESHOLD_SEC) {
+        // Value is a timestamp; the bot treats it as fresh only within its own
+        // OWNER_DESK_WINDOW_MS, so a generous TTL here is fine.
+        await pub.set("owner:desk_active", Date.now().toString(), "EX", 300);
+      }
+    } catch {
+      /* ignore transient errors */
+    }
+  };
+  tick();
+  setInterval(tick, DESK_PING_SEC * 1000);
+  console.log(
+    `[notifier] desk presence on (active if idle < ${IDLE_THRESHOLD_SEC}s, ping every ${DESK_PING_SEC}s)`,
+  );
+}
 
 redis.on("message", (_channel, raw) => {
   let payload;

@@ -55,6 +55,19 @@ npm start
 Register it in Task Scheduler → "At log on" → run this `.bat` (Start action,
 "Start in" set to the folder). No SSH/tunnel setup needed with Upstash.
 
+## Desk presence (fixes "bot replies while I'm online")
+
+This client also reports whether you're **at your computer** (based on OS idle
+time) to a Redis key the bot reads. While you're active, the bot won't
+auto-reply on your behalf — it only steps in once you've been idle/away. This
+solves the case the send-based proxy can't catch: WhatsApp open but you're just
+reading.
+
+Needs the `desktop-idle` dependency (installed by `npm install`; it's a small
+native module and may need Windows build tools — if it fails to build, presence
+is simply skipped and the bot falls back to send-based detection). Set
+`DESK_PRESENCE=false` to opt out.
+
 ## Config (`.env`)
 
 | Var | Default | Meaning |
@@ -63,6 +76,12 @@ Register it in Task Scheduler → "At log on" → run this `.bat` (Start action,
 | `REDIS_HOST` / `PORT` / `PASSWORD` / `TLS` | — | Only used if `REDIS_URL` is blank (e.g. tunneled self-hosted Redis) |
 | `NOTIFY_CHANNEL` | `laptop:notify` | Must match the bot's `LAPTOP_NOTIFY_CHANNEL` |
 | `MIN_SEVERITIES` | `low,medium,high` | Comma list — drop `low` to only be pinged for things worth replying to soon |
+| `DESK_PRESENCE` | `true` | Report at-desk presence so the bot stays quiet while you're active |
+| `IDLE_THRESHOLD_SEC` | `120` | Considered "at desk" if last input was under this many seconds ago |
+| `DESK_PING_SEC` | `30` | How often to report presence |
+
+> The bot side has a matching `OWNER_DESK_WINDOW_MS` (default 90s) — it treats
+> the presence signal as valid only if reported within that window.
 
 ## Disabling
 

@@ -9,7 +9,7 @@ const base = {
   isSaved: true,
   text: "hi",
   count: 0,
-  limit: 3,
+  limit: 5,
   ownerOnline: false,
 };
 
@@ -25,32 +25,46 @@ describe("decideGenericAction — scope passes", () => {
   });
 });
 
-describe("decideGenericAction — offline greeting (non-command)", () => {
-  it("greets the first message of the day when owner is offline", () => {
-    expect(decideGenericAction({ ...base, count: 0, ownerOnline: false }).type).toBe("greet");
+describe("decideGenericAction — owner online means silence", () => {
+  it("suppresses the greeting when the owner is online", () => {
+    expect(decideGenericAction({ ...base, ownerOnline: true }).type).toBe("silent");
   });
-  it("stays silent when the owner is online", () => {
-    expect(decideGenericAction({ ...base, count: 0, ownerOnline: true }).type).toBe("silent");
-  });
-  it("ignores later non-! messages once the first reply is used", () => {
-    expect(decideGenericAction({ ...base, count: 1 }).type).toBe("silent");
-  });
-  it("goes silent when the daily budget is spent", () => {
-    expect(decideGenericAction({ ...base, count: 3 }).type).toBe("silent");
+  it("suppresses even an explicit !chat when the owner is online", () => {
+    expect(
+      decideGenericAction({ ...base, text: "!chat hello", ownerOnline: true }).type,
+    ).toBe("silent");
   });
 });
 
-describe("decideGenericAction — ! commands", () => {
-  it("!reset and !help always work and are never counted", () => {
-    expect(decideGenericAction({ ...base, text: "!reset", count: 3 }).type).toBe("reset");
-    expect(decideGenericAction({ ...base, text: "!help", count: 3 }).type).toBe("help");
+describe("decideGenericAction — offline greeting (non-command)", () => {
+  it("greets the first message while away", () => {
+    expect(decideGenericAction({ ...base, count: 0 }).type).toBe("greet");
   });
-  it("!<message> under budget produces a counted reply with the stripped text", () => {
-    const a = decideGenericAction({ ...base, text: "!how are you", count: 1 });
+  it("ignores later non-command messages once the greeting is used", () => {
+    expect(decideGenericAction({ ...base, count: 1 }).type).toBe("silent");
+  });
+  it("goes silent when the budget is spent", () => {
+    expect(decideGenericAction({ ...base, count: 5 }).type).toBe("silent");
+  });
+});
+
+describe("decideGenericAction — !chat and utility commands", () => {
+  it("!reset and !help always work and are never counted", () => {
+    expect(decideGenericAction({ ...base, text: "!reset", count: 5 }).type).toBe("reset");
+    expect(decideGenericAction({ ...base, text: "!help", count: 5 }).type).toBe("help");
+  });
+  it("!chat under budget replies with the stripped text", () => {
+    const a = decideGenericAction({ ...base, text: "!chat how are you", count: 1 });
     expect(a.type).toBe("reply");
     expect(a).toMatchObject({ userMsg: "how are you" });
   });
-  it("!<message> over budget is silent", () => {
-    expect(decideGenericAction({ ...base, text: "!hello", count: 3 }).type).toBe("silent");
+  it("!chat with no text shows help", () => {
+    expect(decideGenericAction({ ...base, text: "!chat" }).type).toBe("help");
+  });
+  it("!chat over budget is silent", () => {
+    expect(decideGenericAction({ ...base, text: "!chat hello", count: 5 }).type).toBe("silent");
+  });
+  it("a stray '!<message>' fumble is treated as a normal message (greets)", () => {
+    expect(decideGenericAction({ ...base, text: "!<remind him ...>", count: 0 }).type).toBe("greet");
   });
 });
