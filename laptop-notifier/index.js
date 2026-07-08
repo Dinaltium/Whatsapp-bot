@@ -58,7 +58,26 @@ redis.subscribe(CHANNEL, (err) => {
 // owner:desk_active key the bot already reads.
 const WA_PRESENCE = (process.env.WA_PRESENCE ?? "true").toLowerCase() !== "false";
 const PRESENCE_PING_SEC = Number(process.env.PRESENCE_PING_SEC || 7);
-const WA_MATCH = new RegExp(process.env.WHATSAPP_MATCH || "whatsapp", "i");
+// Optional override: if set, treat the window as WhatsApp when this regex
+// matches the title/app. Leave unset to use the smart owner-based detection
+// below (which avoids false hits from windows that merely mention "whatsapp",
+// e.g. this repo "Whatsapp-bot", an editor, or a terminal in that folder).
+const WA_MATCH = process.env.WHATSAPP_MATCH ? new RegExp(process.env.WHATSAPP_MATCH, "i") : null;
+
+const BROWSER_RE = /chrome|edge|firefox|brave|opera|chromium|vivaldi|arc/i;
+
+// True only when the focused window is the WhatsApp app, or a browser whose
+// active tab is WhatsApp Web. A browser tab's page title is "WhatsApp" or
+// "(N) WhatsApp" (then " - <Browser>"); requiring "whatsapp" to end at a word/
+// space boundary keeps "Whatsapp-bot" from matching.
+function isWhatsAppFocused(win) {
+  const title = (win && win.title) || "";
+  const owner = (win && win.owner && win.owner.name) || "";
+  if (WA_MATCH) return WA_MATCH.test(title) || WA_MATCH.test(owner);
+  if (/^whatsapp\b/i.test(owner.trim())) return true; // WhatsApp desktop app
+  if (BROWSER_RE.test(owner) && /(^|\s|\()whatsapp(\s|$|–|—)/i.test(title)) return true;
+  return false;
+}
 
 const pub = redis.duplicate();
 pub.on("error", () => {});
@@ -79,12 +98,20 @@ async function startPresence() {
   if (!WA_PRESENCE) return;
   await loadActiveWin();
   if (!activeWin) return;
+  let lastFocused = null;
   const tick = async () => {
     try {
       const win = await activeWin();
-      const title = (win && win.title) || "";
-      const owner = (win && win.owner && win.owner.name) || "";
-      if (WA_MATCH.test(title) || WA_MATCH.test(owner)) {
+      const focused = isWhatsAppFocused(win);
+      if (focused !== lastFocused) {
+        lastFocused = focused;
+        const owner = (win && win.owner && win.owner.name) || "?";
+        const title = ((win && win.title) || "").slice(0, 50);
+        console.log(
+          `[notifier] WhatsApp focused = ${focused} (active window: ${owner} — "${title}")`,
+        );
+      }
+      if (focused) {
         // Only publish while WhatsApp is focused; when it isn't, the key ages
         // out within the bot's OWNER_DESK_WINDOW_MS and the owner reads as away.
         await pub.set("owner:desk_active", Date.now().toString(), "EX", 120);
