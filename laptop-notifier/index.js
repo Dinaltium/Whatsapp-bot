@@ -75,6 +75,9 @@ function isWhatsAppFocused(win) {
   const owner = (win && win.owner && win.owner.name) || "";
   if (WA_MATCH) return WA_MATCH.test(title) || WA_MATCH.test(owner);
   if (/^whatsapp\b/i.test(owner.trim())) return true; // WhatsApp desktop app
+  // "(64) WhatsApp[ - Browser]" — the unread-badge title is uniquely WA Web,
+  // so accept it regardless of which browser active-win reports.
+  if (/^\(\d+\)\s*whatsapp\b/i.test(title.trim())) return true;
   if (BROWSER_RE.test(owner) && /(^|\s|\()whatsapp(\s|$|–|—)/i.test(title)) return true;
   return false;
 }
