@@ -52,42 +52,50 @@ redis.subscribe(CHANNEL, (err) => {
 // Reports "owner is at the computer" (based on OS idle time) so the bot doesn't
 // auto-reply while you're online-but-idle. Uses a SECOND connection because a
 // subscribed ioredis connection can't issue other commands.
-const DESK_PRESENCE = (process.env.DESK_PRESENCE ?? "true").toLowerCase() !== "false";
-const IDLE_THRESHOLD_SEC = Number(process.env.IDLE_THRESHOLD_SEC || 120);
-const DESK_PING_SEC = Number(process.env.DESK_PING_SEC || 30);
-
-let idleLib = null;
-if (DESK_PRESENCE) {
-  try {
-    idleLib = require("desktop-idle");
-  } catch {
-    console.warn(
-      "[notifier] desktop-idle not installed — desk presence off. Run `npm install` (needs build tools). The bot falls back to send-based presence.",
-    );
-  }
-}
+// Presence = "is WhatsApp the focused window right now". This is what the bot
+// treats as "owner online" — so being at the computer in another app (Claude,
+// a browser, etc.) counts as AWAY, and you get notified. Reports to the same
+// owner:desk_active key the bot already reads.
+const WA_PRESENCE = (process.env.WA_PRESENCE ?? "true").toLowerCase() !== "false";
+const PRESENCE_PING_SEC = Number(process.env.PRESENCE_PING_SEC || 7);
+const WA_MATCH = new RegExp(process.env.WHATSAPP_MATCH || "whatsapp", "i");
 
 const pub = redis.duplicate();
 pub.on("error", () => {});
 
-function startPresence() {
-  if (!DESK_PRESENCE || !idleLib) return;
+let activeWin = null;
+async function loadActiveWin() {
+  try {
+    const mod = await import("active-win"); // ESM-only → dynamic import
+    activeWin = mod.activeWindow || mod.default || mod;
+  } catch {
+    console.warn(
+      "[notifier] active-win not installed — WhatsApp presence off. Run `npm install`. The bot falls back to send-based presence.",
+    );
+  }
+}
+
+async function startPresence() {
+  if (!WA_PRESENCE) return;
+  await loadActiveWin();
+  if (!activeWin) return;
   const tick = async () => {
     try {
-      if (idleLib.getIdleTime() < IDLE_THRESHOLD_SEC) {
-        // Value is a timestamp; the bot treats it as fresh only within its own
-        // OWNER_DESK_WINDOW_MS, so a generous TTL here is fine.
-        await pub.set("owner:desk_active", Date.now().toString(), "EX", 300);
+      const win = await activeWin();
+      const title = (win && win.title) || "";
+      const owner = (win && win.owner && win.owner.name) || "";
+      if (WA_MATCH.test(title) || WA_MATCH.test(owner)) {
+        // Only publish while WhatsApp is focused; when it isn't, the key ages
+        // out within the bot's OWNER_DESK_WINDOW_MS and the owner reads as away.
+        await pub.set("owner:desk_active", Date.now().toString(), "EX", 120);
       }
     } catch {
       /* ignore transient errors */
     }
   };
   tick();
-  setInterval(tick, DESK_PING_SEC * 1000);
-  console.log(
-    `[notifier] desk presence on (active if idle < ${IDLE_THRESHOLD_SEC}s, ping every ${DESK_PING_SEC}s)`,
-  );
+  setInterval(tick, PRESENCE_PING_SEC * 1000);
+  console.log(`[notifier] WhatsApp-focus presence on (checking every ${PRESENCE_PING_SEC}s)`);
 }
 
 redis.on("message", (_channel, raw) => {
