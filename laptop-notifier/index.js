@@ -64,22 +64,19 @@ const PRESENCE_PING_SEC = Number(process.env.PRESENCE_PING_SEC || 7);
 // e.g. this repo "Whatsapp-bot", an editor, or a terminal in that folder).
 const WA_MATCH = process.env.WHATSAPP_MATCH ? new RegExp(process.env.WHATSAPP_MATCH, "i") : null;
 
-const BROWSER_RE = /chrome|edge|firefox|brave|opera|chromium|vivaldi|arc/i;
+// STRICT: the window title must *be* WhatsApp Web, i.e. exactly "WhatsApp",
+// "(N) WhatsApp", or "WhatsApp Web" — optionally followed by a browser suffix
+// like " - Google Chrome" / " — Personal — Microsoft Edge". This deliberately
+// rejects titles that merely CONTAIN "whatsapp" (e.g. "...Whatsapp Bot |
+// Dokploy...", this repo, editors), which is what caused false "online".
+const WA_STRICT = /^(\(\d+\)\s*)?whatsapp(\s+web)?(\s+[-–—|]\s+.*)?$/i;
 
-// True only when the focused window is the WhatsApp app, or a browser whose
-// active tab is WhatsApp Web. A browser tab's page title is "WhatsApp" or
-// "(N) WhatsApp" (then " - <Browser>"); requiring "whatsapp" to end at a word/
-// space boundary keeps "Whatsapp-bot" from matching.
 function isWhatsAppFocused(win) {
-  const title = (win && win.title) || "";
-  const owner = (win && win.owner && win.owner.name) || "";
+  const title = ((win && win.title) || "").trim();
+  const owner = ((win && win.owner && win.owner.name) || "").trim();
   if (WA_MATCH) return WA_MATCH.test(title) || WA_MATCH.test(owner);
-  if (/^whatsapp\b/i.test(owner.trim())) return true; // WhatsApp desktop app
-  // "(64) WhatsApp[ - Browser]" — the unread-badge title is uniquely WA Web,
-  // so accept it regardless of which browser active-win reports.
-  if (/^\(\d+\)\s*whatsapp\b/i.test(title.trim())) return true;
-  if (BROWSER_RE.test(owner) && /(^|\s|\()whatsapp(\s|$|–|—)/i.test(title)) return true;
-  return false;
+  if (/^whatsapp$/i.test(owner)) return true; // WhatsApp desktop app
+  return WA_STRICT.test(title);
 }
 
 const pub = redis.duplicate();
