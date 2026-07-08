@@ -201,7 +201,13 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
   // Cheap pre-checks before any I/O.
   if (!from || from.endsWith("@g.us") || from === "status@broadcast") return false;
   if (isAdmin || !text || text.startsWith("!!")) return false;
-  if (chatConfig.isChatAllowed(from)) return false;
+
+  // Bot 0 is the always-available small-talk / auto-reply layer, reached via
+  // `!chat`. In a configured (bot 1/2/3) chat, ONLY `!chat` goes to bot 0 —
+  // every other message is handled by that chat's assigned bot. In an
+  // unconfigured DM, bot 0 handles everything (greeting, !chat, !reset, !help).
+  const isChatCmd = text.toLowerCase().startsWith("!chat");
+  if (chatConfig.isChatAllowed(from) && !isChatCmd) return false;
 
   const requireSaved = REPLY_AUDIENCE === "saved";
   const isSaved = requireSaved ? await isSavedContact(senderId, from) : true;
