@@ -26,7 +26,7 @@ import { decideGenericAction } from "./genericPolicy";
 import { logStructured, getJidHash } from "../../utils/logger";
 
 const ACTIVITY_WINDOW_MS = Number(process.env.OWNER_ONLINE_WINDOW_MS) || 30 * 1000;
-const DESK_WINDOW_MS = Number(process.env.OWNER_DESK_WINDOW_MS) || 90 * 1000;
+const DESK_WINDOW_MS = Number(process.env.OWNER_DESK_WINDOW_MS) || 20 * 1000;
 const MSG_LIMIT = Number(process.env.GENERIC_MSG_LIMIT) || 5;
 const WINDOW_SEC = (Number(process.env.GENERIC_WINDOW_HOURS) || 4) * 3600;
 const NOTIFY_COOLDOWN_SEC = Number(process.env.NOTIFY_PER_SENDER_COOLDOWN_SEC) || 300;
