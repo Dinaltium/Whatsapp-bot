@@ -202,14 +202,21 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
   if (!from || from.endsWith("@g.us") || from === "status@broadcast") return false;
   if (isAdmin || !text || text.startsWith("!!")) return false;
 
-  // Bot 0 is the always-available small-talk / auto-reply layer, reached via
-  // `!chat`. In a configured (bot 1/2/3) chat, ONLY `!chat` goes to bot 0 —
-  // every other message is handled by that chat's assigned bot. In an
-  // unconfigured DM, bot 0 handles everything (greeting, !chat, !reset, !help).
-  const isChatCmd = text.toLowerCase().startsWith("!chat");
-  if (chatConfig.isChatAllowed(from) && !isChatCmd) return false;
+  // Bot 0 is the always-available auto-reply/notify layer. In a configured
+  // (bot 1/2/3) chat it owns ONLY `!chat` and plain messages (greeting/notify);
+  // every OTHER command belongs to that chat's assigned bot. In an unconfigured
+  // DM, bot 0 handles everything (greeting, !chat, !reset, !help).
+  const allowlisted = chatConfig.isChatAllowed(from);
+  if (
+    allowlisted &&
+    text.startsWith("!") &&
+    !text.toLowerCase().startsWith("!chat")
+  ) {
+    return false;
+  }
 
-  const requireSaved = REPLY_AUDIENCE === "saved";
+  // Allowlisted chats are always in-audience; otherwise honour REPLY_AUDIENCE.
+  const requireSaved = REPLY_AUDIENCE === "saved" && !allowlisted;
   const isSaved = requireSaved ? await isSavedContact(senderId, from) : true;
   if (requireSaved && !isSaved) {
     logStructured({
@@ -228,7 +235,7 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
     isGroup: false,
     isBroadcast: false,
     isAdmin,
-    isAllowlisted: false,
+    isAllowlisted: allowlisted,
     isSaved,
     text,
     count,
