@@ -43,18 +43,27 @@ export async function recordOwnerActivity(): Promise<void> {
   }
 }
 
-async function isOwnerOnline(): Promise<boolean> {
+/**
+ * Owner-online decision with the reason, so logs show WHY the bot stayed quiet:
+ *   via = "desk(Ns)"     → WhatsApp was focused N seconds ago (laptop presence)
+ *   via = "activity(Ns)" → the owner sent a message N seconds ago
+ *   via = "none"         → away
+ */
+async function ownerOnlineInfo(): Promise<{ online: boolean; via: string }> {
   try {
     const { redis } = await import("../../storage/redisClient");
-    // Desk presence (published by laptop-notifier) is authoritative — catches
-    // "app open but idle", which the send-based proxy cannot.
+    const now = Date.now();
     const desk = await redis.get("owner:desk_active");
-    if (desk && Date.now() - Number(desk) < DESK_WINDOW_MS) return true;
+    if (desk && now - Number(desk) < DESK_WINDOW_MS) {
+      return { online: true, via: `desk(${Math.round((now - Number(desk)) / 1000)}s)` };
+    }
     const active = await redis.get("owner:last_active");
-    if (active && Date.now() - Number(active) < ACTIVITY_WINDOW_MS) return true;
-    return false;
+    if (active && now - Number(active) < ACTIVITY_WINDOW_MS) {
+      return { online: true, via: `activity(${Math.round((now - Number(active)) / 1000)}s)` };
+    }
+    return { online: false, via: "none" };
   } catch {
-    return false;
+    return { online: false, via: "error" };
   }
 }
 
@@ -229,7 +238,7 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
   }
 
   const jidKey = senderId || from;
-  const online = await isOwnerOnline();
+  const { online, via: onlineVia } = await ownerOnlineInfo();
   const count = await getCount(jidKey);
   const action = decideGenericAction({
     isGroup: false,
@@ -249,6 +258,7 @@ export async function handleGenericInbound(a: GenericInboundArgs): Promise<boole
     chatHash: getJidHash(from),
     count,
     ownerOnline: online,
+    onlineVia,
     isCommand: text.startsWith("!"),
   });
 
