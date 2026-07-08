@@ -42,18 +42,44 @@ this connects **directly**, no SSH tunnel needed.
    on "laptop:notify" — waiting for messages...`. Trigger a test message (any
    number the generic bot handles) and a toast should appear.
 
-## Run automatically (Windows)
+## Run silently in the background + start at logon + auto-restart
 
-Simplest: a `.bat` file + Task Scheduler entry that runs at logon:
+Three helper files make this turnkey:
 
-```bat
-@echo off
-cd /d "C:\Projects\Whatsapp-bot\laptop-notifier"
-npm start
+- `run-forever.bat` — supervisor loop; if `node` ever exits (crash, force-stop,
+  Redis blip), it relaunches after 5s. So the notifier is self-healing.
+- `start-hidden.vbs` — launches that loop with **no visible window**.
+- `install-startup.ps1` — registers a Scheduled Task that runs the hidden
+  launcher **at every logon** (and restarts the task if it fails).
+
+Install once, from an **Administrator PowerShell**:
+
+```powershell
+cd C:\Projects\Whatsapp-bot\laptop-notifier
+powershell -ExecutionPolicy Bypass -File install-startup.ps1
 ```
 
-Register it in Task Scheduler → "At log on" → run this `.bat` (Start action,
-"Start in" set to the folder). No SSH/tunnel setup needed with Upstash.
+Then start it immediately without logging out:
+
+```powershell
+Start-ScheduledTask -TaskName "LaptopNotifier"
+```
+
+It now runs hidden in the background, starts automatically every time you log
+in, and relaunches itself if it stops or is force-killed.
+
+Check it's running: `Get-Process node` (you'll see a node process), or watch
+for a test toast. Stop it: `Stop-ScheduledTask -TaskName "LaptopNotifier"` then
+kill the node process. Uninstall from startup:
+
+```powershell
+Unregister-ScheduledTask -TaskName "LaptopNotifier" -Confirm:$false
+```
+
+> Prefer a process manager? `npm i -g pm2 pm2-windows-startup`, then
+> `pm2 start index.js --name laptop-notifier && pm2 save && pm2-startup install`.
+> Works too, but pm2 must run in your user session for desk-presence idle
+> detection to work — the scheduled-task approach above already does.
 
 ## Desk presence (fixes "bot replies while I'm online")
 
