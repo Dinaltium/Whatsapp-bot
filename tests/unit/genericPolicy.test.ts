@@ -14,14 +14,28 @@ const base = {
 };
 
 describe("decideGenericAction — scope passes", () => {
-  it("passes groups, broadcast, admin, allowlisted, empty, !!, unsaved", () => {
+  it("passes groups, broadcast, admin, empty, !!, unsaved", () => {
     expect(decideGenericAction({ ...base, isGroup: true }).type).toBe("pass");
     expect(decideGenericAction({ ...base, isBroadcast: true }).type).toBe("pass");
     expect(decideGenericAction({ ...base, isAdmin: true }).type).toBe("pass");
-    expect(decideGenericAction({ ...base, isAllowlisted: true }).type).toBe("pass");
     expect(decideGenericAction({ ...base, text: "" }).type).toBe("pass");
     expect(decideGenericAction({ ...base, text: "!!help" }).type).toBe("pass");
     expect(decideGenericAction({ ...base, isSaved: false }).type).toBe("pass");
+  });
+});
+
+describe("decideGenericAction — bot-1/2/3 chats (isAllowlisted)", () => {
+  const al = { ...base, isAllowlisted: true };
+  it("greets a plain first message while away (notify layer)", () => {
+    expect(decideGenericAction({ ...al, text: "hi", count: 0 }).type).toBe("greet");
+  });
+  it("handles !chat as the generic reply", () => {
+    expect(decideGenericAction({ ...al, text: "!chat hey", count: 0 }).type).toBe("reply");
+  });
+  it("passes every OTHER command to the assigned bot", () => {
+    expect(decideGenericAction({ ...al, text: "!reset" }).type).toBe("pass");
+    expect(decideGenericAction({ ...al, text: "!help" }).type).toBe("pass");
+    expect(decideGenericAction({ ...al, text: "!mentors" }).type).toBe("pass");
   });
 });
 
