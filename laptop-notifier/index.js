@@ -98,26 +98,26 @@ async function startPresence() {
   if (!WA_PRESENCE) return;
   await loadActiveWin();
   if (!activeWin) return;
+  const DEBUG = (process.env.PRESENCE_DEBUG || "").toLowerCase() === "true";
   let lastFocused = null;
   const tick = async () => {
     try {
       const win = await activeWin();
+      const owner = (win && win.owner && win.owner.name) || "?";
+      const title = ((win && win.title) || "").slice(0, 60);
       const focused = isWhatsAppFocused(win);
+      if (DEBUG) console.log(`[notifier] tick: focused=${focused} | ${owner} — "${title}"`);
       if (focused !== lastFocused) {
         lastFocused = focused;
-        const owner = (win && win.owner && win.owner.name) || "?";
-        const title = ((win && win.title) || "").slice(0, 50);
-        console.log(
-          `[notifier] WhatsApp focused = ${focused} (active window: ${owner} — "${title}")`,
-        );
+        console.log(`[notifier] WhatsApp focused = ${focused} (active window: ${owner} — "${title}")`);
       }
       if (focused) {
         // Only publish while WhatsApp is focused; when it isn't, the key ages
         // out within the bot's OWNER_DESK_WINDOW_MS and the owner reads as away.
         await pub.set("owner:desk_active", Date.now().toString(), "EX", 120);
       }
-    } catch {
-      /* ignore transient errors */
+    } catch (err) {
+      if (DEBUG) console.warn("[notifier] presence tick error:", (err && err.message) || err);
     }
   };
   tick();
