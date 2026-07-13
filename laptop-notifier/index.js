@@ -9,8 +9,25 @@
  * set REDIS_TLS=false.
  */
 require("dotenv").config();
+const net = require("net");
 const Redis = require("ioredis");
 const notifier = require("node-notifier");
+
+// ── Single-instance lock ────────────────────────────────────────────────────
+// Bind a loopback port; if it's taken, another notifier is already running, so
+// exit with code 3 (run-forever.bat treats 3 as "don't restart"). This kills
+// the duplicate-toast bug and makes it safe for the scheduled task to relaunch
+// us periodically without ever stacking instances.
+const LOCK_PORT = Number(process.env.NOTIFIER_LOCK_PORT || 47615);
+const lock = net.createServer();
+lock.once("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.log("[notifier] another instance is already running — exiting.");
+    process.exit(3);
+  }
+  // Any other lock error: carry on without the lock rather than refuse to run.
+});
+lock.listen(LOCK_PORT, "127.0.0.1");
 
 const CHANNEL = process.env.NOTIFY_CHANNEL || "laptop:notify";
 const MIN_SEVERITIES = new Set(
@@ -125,6 +142,18 @@ async function startPresence() {
   console.log(`[notifier] WhatsApp-focus presence on (checking every ${PRESENCE_PING_SEC}s)`);
 }
 
+// Belt-and-suspenders de-dupe: skip a toast we already showed in the last 15s
+// (guards against a double publish or a reconnect redelivery).
+const recentToasts = new Map();
+function alreadyShown(payload) {
+  const key = `${payload.timestamp || ""}|${payload.senderName || ""}|${payload.preview || ""}`;
+  const now = Date.now();
+  for (const [k, t] of recentToasts) if (now - t > 15000) recentToasts.delete(k);
+  if (recentToasts.has(key)) return true;
+  recentToasts.set(key, now);
+  return false;
+}
+
 redis.on("message", (_channel, raw) => {
   let payload;
   try {
@@ -135,6 +164,7 @@ redis.on("message", (_channel, raw) => {
   const { senderName, preview, severity, reason } = payload;
   const sev = (severity || "medium").toLowerCase();
   if (!MIN_SEVERITIES.has(sev)) return;
+  if (alreadyShown(payload)) return;
 
   notifier.notify({
     title: `WhatsApp — ${senderName || "Unknown"} [${SEVERITY_LABEL[sev] || sev}]`,
