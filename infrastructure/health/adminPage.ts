@@ -44,6 +44,16 @@ export function renderAdminPage(): string {
   .msg { color:var(--muted); font-size:12px; min-height:18px; margin-top:8px; }
   .hidden { display:none; }
   footer { text-align:center; color:var(--muted); font-size:11px; padding:20px; }
+  .wide { grid-column:1 / -1; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+  td.muted { color:var(--muted); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row input, .row select { width:auto; margin:0; flex:1 1 120px; }
+  select { padding:10px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit; }
+  code.key { display:block; padding:10px; background:var(--bg); border:1px dashed var(--accent); border-radius:6px; word-break:break-all; user-select:all; margin-top:8px; }
+  button.small { padding:4px 10px; font-size:12px; }
 </style>
 </head>
 <body>
@@ -86,6 +96,24 @@ export function renderAdminPage(): string {
     <h2>Pair device</h2>
     <div id="qr"><span class="none">No QR pending — session is linked.</span></div>
     <div class="msg" id="qrMsg">QR refreshes automatically. Scan from WhatsApp → Linked devices.</div>
+  </div>
+  <div class="card wide">
+    <h2>API keys · <span style="text-transform:none;letter-spacing:0">POST /api/v1/messages · GET /api/v1/status · /groups · /chats</span></h2>
+    <div class="row" style="margin-bottom:12px">
+      <input id="kName" placeholder="name (e.g. n8n-dkb)">
+      <select id="kRole"><option value="operator">operator (send)</option><option value="viewer">viewer (read)</option></select>
+      <input id="kBot" placeholder="bot # (blank = any)" inputmode="numeric" style="flex:0 1 150px">
+      <button id="kCreate">Create key</button>
+    </div>
+    <div id="kNew" class="hidden">
+      <div class="msg">Copy now — shown once, only the hash is stored.</div>
+      <code class="key" id="kNewVal"></code>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Prefix</th><th>Role</th><th>Bot</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      <tbody id="kRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+    </table>
+    <div class="msg" id="kMsg">Use: <code>curl -X POST $BASE/api/v1/messages -H "Authorization: Bearer mhk_…" -H "Content-Type: application/json" -d '{"to":"919xxxxxxxxx","text":"hi"}'</code></div>
   </div>
 </main>
 
@@ -178,6 +206,35 @@ export function renderAdminPage(): string {
   $("restartBtn").onclick = function () { act("restart", "Restart the bot process? WhatsApp will reconnect in ~10–30s."); };
   $("relinkBtn").onclick = function () { act("relink", "Wipe the stored WhatsApp session and restart? You will need to scan a new QR."); };
   $("logoutBtn").onclick = function () { sessionStorage.removeItem(KEY); token = ""; showLogin(); };
+
+  function esc(v) { return String(v == null ? "" : v).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function loadKeys() {
+    api("keys").then(function (r) { return r.ok ? r.json() : r.json().then(function (e) { throw new Error(e.error || r.status); }); }).then(function (j) {
+      var rows = j.keys.map(function (k) {
+        var dead = !!k.revokedAt;
+        return "<tr" + (dead ? ' style="opacity:.45"' : "") + "><td>" + k.id + "</td><td>" + esc(k.name) + "</td><td>" + esc(k.prefix) + "…</td><td>" + esc(k.role) + "</td><td>" + (k.botNumber == null ? "any" : k.botNumber) + "</td><td class='muted'>" + new Date(k.createdAt).toLocaleDateString() + "</td><td class='muted'>" + (k.lastUsedAt ? fmt(new Date(k.lastUsedAt).getTime()) : "never") + "</td><td>" + (dead ? "revoked" : '<button class="small danger" data-revoke="' + k.id + '">Revoke</button>') + "</td></tr>";
+      });
+      $("kRows").innerHTML = rows.length ? rows.join("") : '<tr><td colspan="8" class="muted">No keys yet.</td></tr>';
+    }).catch(function (e) {
+      $("kRows").innerHTML = '<tr><td colspan="8" class="muted">Could not load keys: ' + esc(e.message) + '</td></tr>';
+    });
+  }
+  $("kCreate").onclick = function () {
+    var name = $("kName").value.trim(); if (!name) { $("kMsg").textContent = "Name required."; return; }
+    var bot = $("kBot").value.trim();
+    api("keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name, role: $("kRole").value, botNumber: bot === "" ? null : Number(bot) }) })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        if (j.key) { $("kNew").classList.remove("hidden"); $("kNewVal").textContent = j.key; $("kName").value = ""; $("kBot").value = ""; loadKeys(); }
+        else $("kMsg").textContent = j.detail || j.error || "Failed";
+      });
+  };
+  $("kRows").onclick = function (e) {
+    var id = e.target && e.target.getAttribute && e.target.getAttribute("data-revoke");
+    if (!id || !confirm("Revoke key #" + id + "? Scripts using it will start getting 401.")) return;
+    api("keys/" + id, { method: "DELETE" }).then(function () { loadKeys(); });
+  };
+  var origShowDash = showDash;
+  showDash = function () { origShowDash(); loadKeys(); };
 
   if (token) showDash(); else showLogin();
 })();

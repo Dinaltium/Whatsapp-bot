@@ -194,6 +194,24 @@ Events, communities, and projects are pulled from the dk24.org public REST API
 - **Watchdog** (`WATCHDOG_STALE_MS`, default 5 min): if the socket hasn't been open for that long — and we're not logged-out or mid-QR — the process exits 1 so the platform restarts it. A hung "connecting" socket no longer strands the bot.
 - **Admin dashboard** at `/admin`, enabled by setting `ADMIN_TOKEN`. Shows session state, self JID, last inbound/outbound, reconnect count, and renders the pairing QR in-browser (no more scanning from logs). Buttons: *Restart process*, *Wipe session & relink*. API is Bearer-token gated with constant-time compare and per-IP lockout after 10 bad attempts.
 
+## Public REST API (`/api/v1`)
+
+Send through MAHORAGA from scripts, n8n, cron — without a second WhatsApp client. Every send takes the exact same path as a chat reply (`sendBotReply`): per-recipient cap, global account cap, typing delay, secret scrub. There is no bypass.
+
+Create keys in the dashboard (`/admin` → API keys). Keys are `mhk_…`, shown once, stored hashed. Role `operator` can send; `viewer` is read-only. Optional bot-number scope restricts a key to that bot's allowlisted chats. `ADMIN_TOKEN` also works as an unscoped operator.
+
+| Method | Path | Body / notes |
+|---|---|---|
+| `POST` | `/api/v1/messages` | `{"to":"<jid or phone>","text":"…"}` → `202 {accepted}`. Target must be allowlisted (or an admin JID). |
+| `GET` | `/api/v1/status` | socket state, last in/out |
+| `GET` | `/api/v1/groups` · `/chats` | allowlist rows visible to the key's scope |
+
+```bash
+curl -X POST https://<service>.onrender.com/api/v1/messages   -H "Authorization: Bearer mhk_…" -H "Content-Type: application/json"   -d '{"to":"120363xxxxx@g.us","text":"Standup in 10."}'
+```
+
+Errors: `401` bad key · `403 recipient_not_allowlisted | recipient_disabled | bot_scope_mismatch | forbidden` · `429` per-key throttle (`API_REQUESTS_PER_MIN`) · `503 socket_not_open`.
+
 ## Deployment (Render)
 
 Node runtime (no Docker needed — `ffmpeg-static` ships the binary). Build `npm ci && npm run build`, start `npm start`. Do **not** set `PORT`; Render injects it. Set health check path to `/health`. Free tier sleeps after 15 min idle and drops the WA socket — use a Background Worker / Starter plan, or an external pinger on `/health`.

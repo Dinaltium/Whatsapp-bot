@@ -3,6 +3,13 @@ import crypto from "crypto";
 import QRCode from "qrcode";
 import { getBotStatus, isHealthy } from "./botStatus";
 import { renderAdminPage } from "./adminPage";
+import { handlePublicApi } from "../api/publicApi";
+import {
+  createApiKey,
+  listApiKeys,
+  revokeApiKey,
+  type ApiKeyRole,
+} from "../../storage/core/apiKeyRepository";
 
 let isHealthServerStarted = false;
 
@@ -43,6 +50,31 @@ function isAuthorized(req: http.IncomingMessage): boolean {
   if (next.count >= MAX_FAILS) next.blockedUntil = Date.now() + BLOCK_MS;
   failedAttempts.set(ip, next);
   return false;
+}
+
+function readJsonBody(req: http.IncomingMessage, limit = 16 * 1024): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error("body_too_large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      if (!chunks.length) return resolve({});
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        reject(new Error("invalid_json"));
+      }
+    });
+    req.on("error", reject);
+  });
 }
 
 function json(res: http.ServerResponse, code: number, body: unknown): void {
@@ -127,6 +159,46 @@ async function handleAdminApi(
     return;
   }
 
+  // ── API key management ──────────────────────────────────────────────
+  if (route === "keys" && req.method === "GET") {
+    json(res, 200, { keys: await listApiKeys() });
+    return;
+  }
+
+  if (route === "keys" && req.method === "POST") {
+    let body: any;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message });
+      return;
+    }
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const role: ApiKeyRole = body.role === "viewer" ? "viewer" : "operator";
+    const botRaw = body.botNumber;
+    const botNumber =
+      botRaw === null || botRaw === undefined || botRaw === "" ? null : Number(botRaw);
+    if (!name) {
+      json(res, 400, { error: "bad_request", detail: "`name` is required" });
+      return;
+    }
+    if (botNumber !== null && (!Number.isInteger(botNumber) || botNumber < 0)) {
+      json(res, 400, { error: "bad_request", detail: "`botNumber` must be a non-negative integer or null" });
+      return;
+    }
+    const { record, key } = await createApiKey(name, role, botNumber);
+    // The raw key is shown exactly once; only its hash is persisted.
+    json(res, 201, { key, record });
+    return;
+  }
+
+  const revokeMatch = route.match(/^keys\/(\d+)$/);
+  if (revokeMatch && req.method === "DELETE") {
+    const ok = await revokeApiKey(Number(revokeMatch[1]));
+    json(res, ok ? 200 : 404, ok ? { revoked: true } : { error: "not_found_or_already_revoked" });
+    return;
+  }
+
   json(res, 404, { error: "not_found" });
 }
 
@@ -153,6 +225,15 @@ export function startHealthServer(): void {
         service: "mahoraga",
         state: s.state,
         lastOpenAt: s.lastOpenAt,
+      });
+      return;
+    }
+
+    if (path.startsWith("/api/v1/")) {
+      const route = path.slice("/api/v1/".length);
+      handlePublicApi(req, res, route).catch((err) => {
+        console.error("[api] handler error:", err);
+        if (!res.headersSent) json(res, 500, { error: "internal" });
       });
       return;
     }

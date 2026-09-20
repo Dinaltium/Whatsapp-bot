@@ -33,7 +33,11 @@ import {
   setQr,
   markInbound,
   markOutbound,
+  isHealthy,
+  getBotStatus,
 } from "./infrastructure/health/botStatus";
+import { configurePublicApi } from "./infrastructure/api/publicApi";
+import { verifyApiKey } from "./storage/core/apiKeyRepository";
 import { registerContactSyncHandlers } from "./infrastructure/whatsapp/contactSync";
 import { registerLidMapperHandlers } from "./infrastructure/whatsapp/lidMapper";
 import { startReminderScheduler } from "./infrastructure/scheduler/reminderScheduler";
@@ -510,6 +514,36 @@ async function startBot(): Promise<void> {
     restart: () => {
       logStructured({ event: "admin_restart_requested" });
       process.exit(1);
+    },
+  });
+  configurePublicApi({
+    adminToken: () => process.env.ADMIN_TOKEN || "",
+    verifyApiKey,
+    // Same path as a chat reply: rate caps, typing delay, secret scrub.
+    send: (to, text) => sendBotReply(activeSocket, to, text),
+    isSocketOpen: () => isHealthy(),
+    normalizeJid: (jid) => {
+      // Accept bare phone numbers as a convenience for scripts.
+      const raw = /^\+?\d{6,15}$/.test(jid.trim()) ? `${jid.trim().replace(/^\+/, "")}@s.whatsapp.net` : jid;
+      return normalizeJid(raw);
+    },
+    listGroups: () => groupConfig.listGroups(),
+    listChats: () => chatConfig.listChats(),
+    adminJids: () =>
+      (process.env.ADMIN_JIDS || "")
+        .split(",")
+        .map((j) => normalizeJid(j.trim()) || "")
+        .filter(Boolean),
+    statusSnapshot: () => {
+      const st = getBotStatus();
+      return {
+        state: st.state,
+        healthy: isHealthy(),
+        selfJid: st.selfJid,
+        lastOpenAt: st.lastOpenAt,
+        lastInboundAt: st.lastInboundAt,
+        lastOutboundAt: st.lastOutboundAt,
+      };
     },
   });
   startReminderScheduler();
