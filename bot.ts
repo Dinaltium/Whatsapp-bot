@@ -18,12 +18,22 @@ if (ffmpegPath) {
 
 import groupConfig from "./config/groupAllowlist";
 import chatConfig from "./config/chatAllowlist";
-import { useNeonAuthState, getDatabaseUrl } from "./storage/neonAuthStateStore";
+import { useNeonAuthState, getDatabaseUrl, clearAuthState } from "./storage/neonAuthStateStore";
 import { getJidHash, logStructured, logEvent } from "./utils/logger";
 import { normalizeJid, isAdminSender } from "./security/rbac";
 import { scrubSecrets } from "./security/secretScrubber";
 import { calculateTypingDelay } from "./utils/typingDelay";
-import { startHealthServer } from "./infrastructure/health/healthServer";
+import { startHealthServer, registerAdminActions } from "./infrastructure/health/healthServer";
+import {
+  startWatchdog,
+  markConnecting,
+  markOpen,
+  markClosed,
+  markReconnectAttempt,
+  setQr,
+  markInbound,
+  markOutbound,
+} from "./infrastructure/health/botStatus";
 import { registerContactSyncHandlers } from "./infrastructure/whatsapp/contactSync";
 import { registerLidMapperHandlers } from "./infrastructure/whatsapp/lidMapper";
 import { startReminderScheduler } from "./infrastructure/scheduler/reminderScheduler";
@@ -62,6 +72,7 @@ function scheduleReconnect(baseMs: number, reason: string): void {
   const jitter = Math.floor(Math.random() * 1000);
   const delay = backoff + jitter;
   logStructured({ event: "reconnecting", reason, attempt, delayMs: delay });
+  markReconnectAttempt(attempt);
   setTimeout(() => startBot(), delay);
 }
 
@@ -71,7 +82,7 @@ function scheduleReconnect(baseMs: number, reason: string): void {
 // divergent source of truth.
 
 function printBanner(): void {
-  console.log("\nWhatsApp Bot Coordinator Online.");
+  console.log("\nMAHORAGA online.");
 }
 
 export async function sendBotReply(
@@ -481,6 +492,26 @@ let persistentAuthStore: any = null;
 async function startBot(): Promise<void> {
   printBanner();
   startHealthServer();
+  startWatchdog();
+  registerAdminActions({
+    relink: async () => {
+      logStructured({ event: "admin_relink_requested" });
+      try {
+        activeSocket?.ws?.close();
+      } catch (_) {
+        /* socket may already be dead */
+      }
+      const removed = await clearAuthState("parag");
+      logStructured({ event: "admin_relink_wiped", rows: removed });
+      // Exit non-zero so the platform restarts us; the fresh boot has no
+      // creds and emits a QR that the dashboard then displays.
+      process.exit(1);
+    },
+    restart: () => {
+      logStructured({ event: "admin_restart_requested" });
+      process.exit(1);
+    },
+  });
   startReminderScheduler();
 
   try {
@@ -540,11 +571,13 @@ async function startBot(): Promise<void> {
     browser: ["Ubuntu", "Chrome", "22.04.4"],
   });
   activeSocket = sock;
+  markConnecting();
 
   // Intercept and cache all bot-sent message IDs to prevent self-loops
   const originalSendMessage = sock.sendMessage.bind(sock);
   sock.sendMessage = async (...args: any[]) => {
     const result = await (originalSendMessage as any)(...args);
+    markOutbound();
     if (result && result.key && result.key.id) {
       try {
         const { redis } = await import("./storage/redisClient");
@@ -574,6 +607,7 @@ async function startBot(): Promise<void> {
     });
 
     if (qr) {
+      setQr(qr);
       qrcode.generate(qr, {
         small: true,
       });
@@ -582,6 +616,7 @@ async function startBot(): Promise<void> {
 
     if (connection === "open") {
       reconnectAttempts = 0; // healthy connection — reset backoff
+      markOpen(sock.user?.id ?? null);
       logStructured({ event: "connection_open", service: "PARAG" });
 
       // ── BOOT NOTIFICATION TO ADMIN (Task 3.9) ──────────────────
@@ -611,6 +646,10 @@ async function startBot(): Promise<void> {
         event: "connection_closed",
         statusCode,
       });
+      markClosed(
+        statusCode,
+        statusCode === DisconnectReason.loggedOut || statusCode === 403 || statusCode === 411,
+      );
 
       // Stop the old socket so it doesn't leak
       try {
@@ -652,6 +691,7 @@ async function startBot(): Promise<void> {
   registerLidMapperHandlers(sock);
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    markInbound();
     try {
       const { handleMessageUpsert } = await import("./core/messageRouter");
       await handleMessageUpsert(sock, messages, type);

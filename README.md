@@ -1,6 +1,6 @@
-# WhatsApp Bot Coordinator
+# MAHORAGA
 
-A TypeScript-based WhatsApp bot coordinator designed for the DK24 and ECB developer networks. It integrates with the Groq AI API (Llama-3.3-70B), Neon PostgreSQL for session persistence, a prompt-injection firewall, and the dk24.org public API for calendar, community, and project data.
+**M**odular **A**utonomous **H**elper for **O**perations, **R**etrieval, **A**utomation & **G**eneral **A**ssistance — a TypeScript WhatsApp bot coordinator designed for the DK24 and ECB developer networks. It integrates with the Groq AI API (Llama-3.3-70B), Neon PostgreSQL for session persistence, a prompt-injection firewall, and the dk24.org public API for calendar, community, and project data.
 
 ## Key Features
 
@@ -187,6 +187,16 @@ Events, communities, and projects are pulled from the dk24.org public REST API
 `DK24_API_BASE_URL`.
 - **In-flight de-duplication:** Concurrent requests for the same resource reuse a single in-flight promise to avoid redundant API hits.
 - **Caching:** Records are cached in Neon; a stale (>24h) cache is served instantly while a background refresh runs. A foreground fetch happens only when the cache table is empty.
+
+## Ops: health, watchdog, admin dashboard
+
+- `GET /health` → `200 {status:"ok"}` only while the WhatsApp socket is open; otherwise `503 {status:"degraded", state}`. Point Render's health check / UptimeRobot here so a dead WA link reads as down.
+- **Watchdog** (`WATCHDOG_STALE_MS`, default 5 min): if the socket hasn't been open for that long — and we're not logged-out or mid-QR — the process exits 1 so the platform restarts it. A hung "connecting" socket no longer strands the bot.
+- **Admin dashboard** at `/admin`, enabled by setting `ADMIN_TOKEN`. Shows session state, self JID, last inbound/outbound, reconnect count, and renders the pairing QR in-browser (no more scanning from logs). Buttons: *Restart process*, *Wipe session & relink*. API is Bearer-token gated with constant-time compare and per-IP lockout after 10 bad attempts.
+
+## Deployment (Render)
+
+Node runtime (no Docker needed — `ffmpeg-static` ships the binary). Build `npm ci && npm run build`, start `npm start`. Do **not** set `PORT`; Render injects it. Set health check path to `/health`. Free tier sleeps after 15 min idle and drops the WA socket — use a Background Worker / Starter plan, or an external pinger on `/health`.
 
 ## Deployment (VPS)
 
