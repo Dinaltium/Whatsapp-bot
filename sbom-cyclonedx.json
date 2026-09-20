@@ -17,7 +17,7 @@
       "type": "application",
       "name": "parag-whatsapp-bot",
       "version": "1.0.0",
-      "description": "TypeScript-based WhatsApp bot coordinator with Groq AI integration, Neon PostgreSQL state store, and admin RBAC allowlists.",
+      "description": "MAHORAGA — TypeScript-based WhatsApp bot coordinator with Groq AI integration, Neon PostgreSQL state store, and admin RBAC allowlists.",
       "licenses": [
         {
           "license": {

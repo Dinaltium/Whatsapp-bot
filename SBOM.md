@@ -1,6 +1,6 @@
 # Software Bill of Materials (SBOM)
 
-This document contains a comprehensive breakdown of all software dependencies, licensing terms, and purposes for the WhatsApp Bot Coordinator.
+This document contains a comprehensive breakdown of all software dependencies, licensing terms, and purposes for MAHORAGA (WhatsApp bot coordinator).
 
 - **Format:** SPDX / CycloneDX JSON Compatible
 - **Generated At:** 2026-05-24T09:15:00Z

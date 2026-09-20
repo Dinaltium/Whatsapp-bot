@@ -74,7 +74,7 @@ export async function parseReminderTimeWithAI(
         Authorization: `Bearer ${groqApiKey}`,
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
         temperature: 0,
         max_tokens: 30,
         messages: [

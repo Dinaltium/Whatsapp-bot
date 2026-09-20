@@ -168,6 +168,18 @@ export async function ensureSchema(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        key_hash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('operator', 'viewer')),
+        bot_number INTEGER,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_used_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ
+      );
+
       CREATE TABLE IF NOT EXISTS dk24_cache_log (
         key TEXT PRIMARY KEY,
         last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW()

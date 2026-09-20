@@ -1,5 +1,5 @@
 {
-  "name": "parag",
+  "name": "mahoraga",
   "version": "1.0.0",
   "description": "",
   "main": "dist/bot.js",
@@ -31,6 +31,7 @@
     "pg": "^8.16.3",
     "pg-format": "^1.0.4",
     "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.34.5",
     "zod": "^4.4.3"
@@ -40,6 +41,7 @@
     "@types/node": "^20.19.41",
     "@types/node-schedule": "^2.1.8",
     "@types/pg": "^8.20.0",
+    "@types/qrcode": "^1.5.6",
     "@types/qrcode-terminal": "^0.12.2",
     "nodemon": "^3.1.14",
     "tsx": "^4.7.0",

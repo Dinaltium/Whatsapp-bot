@@ -158,6 +158,27 @@ async function readMany(
   return mapped;
 }
 
+/**
+ * Wipes every stored credential/key row for the namespace so the next boot
+ * pairs from scratch (fresh QR). Used by the admin dashboard's "relink".
+ * Returns the number of rows removed.
+ */
+export async function clearAuthState(
+  namespace = DEFAULT_NAMESPACE,
+): Promise<number> {
+  const { getPool } = await import("./db");
+  const pool = getPool();
+  if (!pool) {
+    throw new Error("Failed to obtain shared database pool for auth state wipe.");
+  }
+  await ensureSchema(pool);
+  const result = await pool.query(
+    `DELETE FROM ${AUTH_TABLE} WHERE id = $1 OR id LIKE $2`,
+    [buildStorageKey(namespace, "creds"), `${namespace}:%`],
+  );
+  return result.rowCount ?? 0;
+}
+
 export async function useNeonAuthState(
   namespace = DEFAULT_NAMESPACE,
 ): Promise<any> {
