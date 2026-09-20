@@ -35,7 +35,8 @@ import * as path from "path";
 const GROQ_MODEL_SCOUT =
   process.env.GROQ_MODEL_SCOUT ||
   "meta-llama/llama-4-scout-17b-16e-instruct";
-const GROQ_MODEL_DEFAULT = "llama-3.3-70b-versatile";
+// Honour GROQ_MODEL like every other agent; the old hardcoded llama-3.3-70b was retired by Groq.
+const GROQ_MODEL_DEFAULT = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 // Guidance appended when answering from live web results (web-RAG synthesis).
 const WEB_RAG_INSTRUCTIONS = [

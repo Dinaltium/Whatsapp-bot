@@ -44,7 +44,7 @@ import { startReminderScheduler } from "./infrastructure/scheduler/reminderSched
 
 export const COMMAND_PREFIX = "!";
 export const GROQ_API_KEY = process.env.GROQ_API_KEY;
-export const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+export const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const ALLOW_FROM_ME_MESSAGES =
   (process.env.ALLOW_FROM_ME_MESSAGES || "false").toLowerCase() === "true";
 const AI_MAX_SESSION_MESSAGES = 8;

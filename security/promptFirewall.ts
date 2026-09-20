@@ -15,7 +15,7 @@ export function sanitizeForPrompt(input?: any): string {
 export async function hasPromptInjection(
   input: string,
   groqApiKey: string | undefined,
-  groqModel: string = "llama-3.3-70b-versatile",
+  groqModel: string = process.env.GROQ_MODEL || "openai/gpt-oss-120b",
 ): Promise<boolean> {
   if (!input) return false;
 
