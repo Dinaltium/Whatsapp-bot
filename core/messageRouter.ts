@@ -130,25 +130,20 @@ async function processInboundMessage(
     // ── ANTI-REPLAY GUARDS ──
     if (isHistoricalMessage(msg)) return;
 
-    // ── CACHE LATEST VIEW-ONCE MESSAGE ──────────────────────────────────
+    // ── CACHE VIEW-ONCE MESSAGES ─────────────────────────────────────────
+    // Keep the ORIGINAL (with its mediaKey). A later quote of a view-once
+    // message arrives with the key stripped by WhatsApp, so !reveal must look
+    // the original up by id. Detection covers wrapped + flat viewOnce shapes.
     if (msg.message) {
-      const unwrapped = unwrapMessage(msg.message);
-      if (unwrapped) {
-        const hasViewOnce =
-          unwrapped.viewOnceMessage ||
-          unwrapped.viewOnceMessageV2 ||
-          unwrapped.viewOnceMessageV2Lid;
-        if (hasViewOnce) {
-          // Keep the ORIGINAL message (with its mediaKey). A later quote of a
-          // view-once message arrives with the key stripped by WhatsApp, so
-          // !reveal must look the original up by id.
-          const { serializeWAMessage } = await import("../utils/messageSerde");
-          const encoded = serializeWAMessage(msg);
-          await redis.setex(`latest_view_once:${from}`, 3600, encoded);
-          if (msg.key?.id) {
-            await redis.setex(`view_once:${msg.key.id}`, 24 * 3600, encoded);
-          }
+      const { getViewOnceMedia } = await import("../utils/viewOnce");
+      if (getViewOnceMedia(msg.message)) {
+        const { serializeWAMessage } = await import("../utils/messageSerde");
+        const encoded = serializeWAMessage(msg);
+        await redis.setex(`latest_view_once:${from}`, 3600, encoded);
+        if (msg.key?.id) {
+          await redis.setex(`view_once:${msg.key.id}`, 24 * 3600, encoded);
         }
+        logStructured({ event: "view_once_cached", userHash: getJidHash(from) });
       }
     }
 

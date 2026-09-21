@@ -13,14 +13,6 @@ import {
 import { INTRO_NOTIFY_SETTING_KEY } from "../../../infrastructure/whatsapp/introNotifier";
 
 // ── UTILITY: UNWRAP EPHEMERAL MESSAGES ──
-function unwrapMessage(message: any): any {
-  if (!message) return null;
-  if (message.ephemeralMessage?.message) {
-    return unwrapMessage(message.ephemeralMessage.message);
-  }
-  return message;
-}
-
 // ── NEON PING ──
 registerCommand({
   name: "neonping",
@@ -101,10 +93,9 @@ registerCommand({
     // 2. Quoted copy still carries a key (non-view-once media, or an old
     //    client that didn't strip it) — use it directly.
     if (!targetMsg && contextInfo?.quotedMessage) {
-      const q = unwrapMessage(contextInfo.quotedMessage) as any;
-      const inner = q?.viewOnceMessage?.message || q?.viewOnceMessageV2?.message || q?.viewOnceMessageV2Lid?.message || q;
-      const media = inner?.imageMessage || inner?.videoMessage || inner?.audioMessage || inner?.documentMessage;
-      if (media?.mediaKey && (media.mediaKey.length ?? Object.keys(media.mediaKey).length) > 0) {
+      const { getAnyMedia, hasMediaKey } = await import("../../../utils/viewOnce");
+      const found = getAnyMedia(contextInfo.quotedMessage);
+      if (found && hasMediaKey(found.media)) {
         targetMsg = {
           key: { remoteJid: ctx.from, id: contextInfo.stanzaId, participant: contextInfo.participant },
           message: contextInfo.quotedMessage,
@@ -130,7 +121,7 @@ registerCommand({
       await sendBotReply(
         ctx.sock,
         ctx.from,
-        "Can't reveal that one: WhatsApp strips the media key from quoted view-once messages, and the original wasn't seen by the bot (it was sent before the bot was online, or more than 24h ago).",
+        "Can't reveal that one. WhatsApp strips the media key from quoted view-once messages, and the bot never saw the original — either it arrived while the bot was offline / more than 24h ago, or the bot is linked as a web device (WhatsApp withholds view-once media from web; set WA_BROWSER=android and re-pair).",
       );
       return;
     }
@@ -144,23 +135,13 @@ registerCommand({
       return;
     }
 
-    const unwrapped = unwrapMessage(targetMsg.message);
-    if (!unwrapped) {
+    const { getAnyMedia: pickMedia } = await import("../../../utils/viewOnce");
+    const picked = pickMedia(targetMsg.message);
+    if (!picked) {
       await sendBotReply(ctx.sock, ctx.from, "Error: Decrypted message has invalid structure.");
       return;
     }
-
-    const viewOnceContainer = unwrapped.viewOnceMessage 
-      || unwrapped.viewOnceMessageV2 
-      || unwrapped.viewOnceMessageV2Lid;
-
-    let mediaMsg = unwrapped;
-    let isViewOnce = false;
-    if (viewOnceContainer && viewOnceContainer.message) {
-      mediaMsg = viewOnceContainer.message;
-      isViewOnce = true;
-    }
-
+    const mediaMsg: any = picked.inner;
     const imageInfo = mediaMsg.imageMessage;
     const videoInfo = mediaMsg.videoMessage;
     const audioInfo = mediaMsg.audioMessage;
