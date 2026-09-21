@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "http";
-import { startHealthServer, registerAdminActions } from "../../infrastructure/health/healthServer";
+import { startHealthServer } from "../../infrastructure/health/healthServer";
+import { configureAdminApi, type AdminDeps } from "../../infrastructure/health/adminApi";
 import { markOpen, markClosed, setQr } from "../../infrastructure/health/botStatus";
 
 const PORT = 39321;
@@ -32,9 +33,33 @@ function req(
   });
 }
 
+const noopList = {
+  list: () => [],
+  add: async () => true,
+  remove: async () => true,
+  setBot: async () => true,
+  setEnabled: async () => true,
+};
+let restarted = false;
+let relinked = false;
+const deps: AdminDeps = {
+  restart: () => {
+    restarted = true;
+  },
+  relink: async () => {
+    relinked = true;
+  },
+  groups: noopList,
+  chats: noopList,
+  discoverGroups: async () => [],
+  botLabels: () => ({ 0: "Generic" }),
+  normalizeJid: (j) => j,
+};
+
 beforeAll(async () => {
   process.env.PORT = String(PORT);
   process.env.ADMIN_TOKEN = TOKEN;
+  configureAdminApi(deps);
   startHealthServer();
   // give listen() a tick
   await new Promise((r) => setTimeout(r, 50));
@@ -104,16 +129,6 @@ describe("admin dashboard", () => {
   });
 
   it("invokes registered actions and replies 202 before running them", async () => {
-    let restarted = false;
-    let relinked = false;
-    registerAdminActions({
-      restart: () => {
-        restarted = true;
-      },
-      relink: async () => {
-        relinked = true;
-      },
-    });
     const r1 = await req("/admin/api/restart", { method: "POST", token: TOKEN });
     expect(r1.status).toBe(202);
     const r2 = await req("/admin/api/relink", { method: "POST", token: TOKEN });
@@ -126,5 +141,12 @@ describe("admin dashboard", () => {
   it("refuses GET on mutating routes", async () => {
     const res = await req("/admin/api/restart", { token: TOKEN });
     expect(res.status).toBe(404);
+  });
+
+  it("locks an IP out after repeated bad tokens", async () => {
+    for (let i = 0; i < 10; i++) await req("/admin/api/status", { token: "wrong" + i });
+    // Even the right token is refused while blocked.
+    const res = await req("/admin/api/status", { token: TOKEN });
+    expect(res.status).toBe(401);
   });
 });

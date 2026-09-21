@@ -192,7 +192,8 @@ Events, communities, and projects are pulled from the dk24.org public REST API
 
 - `GET /health` → `200 {status:"ok"}` only while the WhatsApp socket is open; otherwise `503 {status:"degraded", state}`. Point Render's health check / UptimeRobot here so a dead WA link reads as down.
 - **Watchdog** (`WATCHDOG_STALE_MS`, default 5 min): if the socket hasn't been open for that long — and we're not logged-out or mid-QR — the process exits 1 so the platform restarts it. A hung "connecting" socket no longer strands the bot.
-- **Admin dashboard** at `/admin`, enabled by setting `ADMIN_TOKEN`. Shows session state, self JID, last inbound/outbound, reconnect count, and renders the pairing QR in-browser (no more scanning from logs). Buttons: *Restart process*, *Wipe session & relink*. API is Bearer-token gated with constant-time compare and per-IP lockout after 10 bad attempts.
+- **Admin console** at `/admin`, enabled by setting `ADMIN_TOKEN`. Session state and pairing QR in the browser; groups and direct-chat allowlists (add from the live list of groups the number is in, change bot, turn on/off, remove); API keys. Everything the `!addgroup` / `!editgroup` / `!disablegroup` family does, without spending WhatsApp messages. Bearer-token gated with constant-time compare and per-IP lockout after 10 bad attempts.
+- **Model check** at boot: `GET /openai/v1/models` on Groq; any configured model Groq no longer serves is logged and shown on the console. Groq retires models without warning — this turns a silent 404 storm into one line.
 
 ## Public REST API (`/api/v1`)
 
