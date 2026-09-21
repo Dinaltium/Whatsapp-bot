@@ -195,6 +195,10 @@ Events, communities, and projects are pulled from the dk24.org public REST API
 - **Admin console** at `/admin`, enabled by setting `ADMIN_TOKEN`. Session state and pairing QR in the browser; groups and direct-chat allowlists (add from the live list of groups the number is in, change bot, turn on/off, remove); API keys. Everything the `!addgroup` / `!editgroup` / `!disablegroup` family does, without spending WhatsApp messages. Bearer-token gated with constant-time compare and per-IP lockout after 10 bad attempts.
 - **Model check** at boot: `GET /openai/v1/models` on Groq; any configured model Groq no longer serves is logged and shown on the console. Groq retires models without warning — this turns a silent 404 storm into one line.
 
+## View-once media (`!reveal`)
+
+WhatsApp does not deliver view-once photos/videos/voice notes to **web-class** linked devices — they get a placeholder. To receive them the companion must announce itself as an Android phone: set `WA_BROWSER=android` (Baileys ≥ 7.0.0-rc14, marked experimental upstream) and **re-pair** (Unlink on `/admin`, scan again). The bot then caches every view-once it sees for 24h by message id; `!reveal` on a quote resolves to that cached original, because the quoted copy has its media key stripped. Anything sent before the bot saw it cannot be recovered.
+
 ## Public REST API (`/api/v1`)
 
 Send through MAHORAGA from scripts, n8n, cron — without a second WhatsApp client. Every send takes the exact same path as a chat reply (`sendBotReply`): per-recipient cap, global account cap, typing delay, secret scrub. There is no bypass.

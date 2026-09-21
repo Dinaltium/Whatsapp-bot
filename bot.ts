@@ -2,6 +2,7 @@ import {
   default as makeWASocket,
   fetchLatestBaileysVersion,
   DisconnectReason,
+  Browsers,
   proto,
 } from "@whiskeysockets/baileys";
 import http from "http";
@@ -636,13 +637,21 @@ async function startBot(): Promise<void> {
 
   const { version } = await fetchLatestBaileysVersion();
 
+  // WA_BROWSER=android makes the companion announce as an Android phone
+  // (Baileys >= rc14). WhatsApp withholds view-once media from web-class
+  // companions, so this is required for !reveal. Changing it invalidates the
+  // pairing — re-link after switching.
+  const browser: [string, string, string] =
+    (process.env.WA_BROWSER || "web").toLowerCase() === "android"
+      ? Browsers.android("13")
+      : ["Ubuntu", "Chrome", "22.04.4"];
   const sock = makeWASocket({
     version,
     auth: state,
     logger: pino({
       level: "silent",
     }),
-    browser: ["Ubuntu", "Chrome", "22.04.4"],
+    browser,
   });
   activeSocket = sock;
   markConnecting();
