@@ -80,29 +80,59 @@ registerCommand({
     }
 
     const contextInfo = ctx.msg.message?.extendedTextMessage?.contextInfo;
+    const { deserializeWAMessage } = await import("../../../utils/messageSerde");
     let targetMsg: any = null;
     let sourceLabel = "";
 
-    if (contextInfo && contextInfo.quotedMessage) {
-      targetMsg = {
-        key: {
-          remoteJid: ctx.from,
-          id: contextInfo.stanzaId,
-          participant: contextInfo.participant
-        },
-        message: contextInfo.quotedMessage
-      };
-      sourceLabel = "quoted message";
-    } else {
+    // 1. Quoted a view-once? Prefer the original we cached at receive time —
+    //    the quoted copy has its mediaKey stripped and cannot be downloaded.
+    if (contextInfo?.stanzaId) {
+      const byId = await redis.get(`view_once:${contextInfo.stanzaId}`);
+      if (byId) {
+        try {
+          targetMsg = deserializeWAMessage(byId);
+          sourceLabel = "quoted message";
+        } catch (e) {
+          console.error("Failed to parse cached view-once message by id:", e);
+        }
+      }
+    }
+
+    // 2. Quoted copy still carries a key (non-view-once media, or an old
+    //    client that didn't strip it) — use it directly.
+    if (!targetMsg && contextInfo?.quotedMessage) {
+      const q = unwrapMessage(contextInfo.quotedMessage) as any;
+      const inner = q?.viewOnceMessage?.message || q?.viewOnceMessageV2?.message || q?.viewOnceMessageV2Lid?.message || q;
+      const media = inner?.imageMessage || inner?.videoMessage || inner?.audioMessage || inner?.documentMessage;
+      if (media?.mediaKey && (media.mediaKey.length ?? Object.keys(media.mediaKey).length) > 0) {
+        targetMsg = {
+          key: { remoteJid: ctx.from, id: contextInfo.stanzaId, participant: contextInfo.participant },
+          message: contextInfo.quotedMessage,
+        };
+        sourceLabel = "quoted message";
+      }
+    }
+
+    // 3. Nothing usable quoted — fall back to the latest view-once in this chat.
+    if (!targetMsg) {
       const cachedJson = await redis.get(`latest_view_once:${ctx.from}`);
       if (cachedJson) {
         try {
-          targetMsg = JSON.parse(cachedJson);
+          targetMsg = deserializeWAMessage(cachedJson);
           sourceLabel = "latest cached view-once message";
         } catch (e) {
           console.error("Failed to parse cached view-once message:", e);
         }
       }
+    }
+
+    if (!targetMsg && contextInfo?.quotedMessage) {
+      await sendBotReply(
+        ctx.sock,
+        ctx.from,
+        "Can't reveal that one: WhatsApp strips the media key from quoted view-once messages, and the original wasn't seen by the bot (it was sent before the bot was online, or more than 24h ago).",
+      );
+      return;
     }
 
     if (!targetMsg || !targetMsg.message) {

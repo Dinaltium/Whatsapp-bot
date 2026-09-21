@@ -9,6 +9,9 @@ import crypto from "crypto";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
+import { installLibsignalQuiet } from "./utils/quietLibsignal";
+// Must run before any libsignal decrypt happens (i.e. before the socket exists).
+installLibsignalQuiet();
 import ffmpegPath from "ffmpeg-static";
 import path from "path";
 

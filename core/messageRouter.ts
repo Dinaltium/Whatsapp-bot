@@ -139,11 +139,15 @@ async function processInboundMessage(
           unwrapped.viewOnceMessageV2 ||
           unwrapped.viewOnceMessageV2Lid;
         if (hasViewOnce) {
-          await redis.setex(
-            `latest_view_once:${from}`,
-            3600,
-            JSON.stringify(msg),
-          );
+          // Keep the ORIGINAL message (with its mediaKey). A later quote of a
+          // view-once message arrives with the key stripped by WhatsApp, so
+          // !reveal must look the original up by id.
+          const { serializeWAMessage } = await import("../utils/messageSerde");
+          const encoded = serializeWAMessage(msg);
+          await redis.setex(`latest_view_once:${from}`, 3600, encoded);
+          if (msg.key?.id) {
+            await redis.setex(`view_once:${msg.key.id}`, 24 * 3600, encoded);
+          }
         }
       }
     }
