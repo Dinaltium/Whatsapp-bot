@@ -23,7 +23,10 @@ import { getJidHash, logStructured, logEvent } from "./utils/logger";
 import { normalizeJid, isAdminSender } from "./security/rbac";
 import { scrubSecrets } from "./security/secretScrubber";
 import { calculateTypingDelay } from "./utils/typingDelay";
-import { startHealthServer, registerAdminActions } from "./infrastructure/health/healthServer";
+import { startHealthServer } from "./infrastructure/health/healthServer";
+import { configureAdminApi } from "./infrastructure/health/adminApi";
+import { checkGroqModels } from "./ai/modelCheck";
+import { BOT_LABELS } from "./agents/core/botLabels";
 import {
   startWatchdog,
   markConnecting,
@@ -497,7 +500,7 @@ async function startBot(): Promise<void> {
   printBanner();
   startHealthServer();
   startWatchdog();
-  registerAdminActions({
+  configureAdminApi({
     relink: async () => {
       logStructured({ event: "admin_relink_requested" });
       try {
@@ -514,6 +517,35 @@ async function startBot(): Promise<void> {
     restart: () => {
       logStructured({ event: "admin_restart_requested" });
       process.exit(1);
+    },
+    groups: {
+      list: () => groupConfig.listGroups(),
+      add: (jid, bot) => groupConfig.addGroup(jid, bot),
+      remove: (id) => groupConfig.removeGroupById(id),
+      setBot: (id, bot) => groupConfig.editGroupBot(id, bot),
+      setEnabled: (id, on) => groupConfig.setGroupEnabled(id, on),
+    },
+    chats: {
+      list: () => chatConfig.listChats(),
+      add: (jid, bot) => chatConfig.addChat(jid, bot),
+      remove: (id) => chatConfig.removeChatById(id),
+      setBot: (id, bot) => chatConfig.editChatBot(id, bot),
+      setEnabled: (id, on) => chatConfig.setChatEnabled(id, on),
+    },
+    discoverGroups: async () => {
+      if (!activeSocket) return [];
+      const all = await activeSocket.groupFetchAllParticipating();
+      return Object.values(all as Record<string, any>).map((g: any) => ({
+        jid: String(g.id),
+        subject: String(g.subject || ""),
+        size: Array.isArray(g.participants) ? g.participants.length : 0,
+      }));
+    },
+    botLabels: () => BOT_LABELS,
+    normalizeJid: (jid) => {
+      const t = jid.trim();
+      const raw = /^\+?\d{6,15}$/.test(t) ? `${t.replace(/^\+/, "")}@s.whatsapp.net` : t;
+      return normalizeJid(raw);
     },
   });
   configurePublicApi({
@@ -552,6 +584,11 @@ async function startBot(): Promise<void> {
     const { redis } = await import("./storage/redisClient");
     await redis.ping();
     console.log("Redis ping successful! Ready for caching and rate limiting.");
+    // Fire-and-forget: a retired model should be loud in the logs, not fatal.
+    void checkGroqModels(GROQ_API_KEY, [
+      GROQ_MODEL,
+      process.env.GROQ_MODEL_SCOUT || "meta-llama/llama-4-scout-17b-16e-instruct",
+    ]);
   } catch (error) {
     console.error(
       "FATAL: Cannot connect to Redis. Ensure REDIS_URL is correctly set and the server is running.",
