@@ -369,7 +369,7 @@ export function renderAdminPage(): string {
       $(countId).textContent = rows.length ? rows.length : "";
       $(rowsId).innerHTML = rows.length ? rows.map(function (e) { return rowFor(kind, e); }).join("") :
         '<tr class="empty"><td colspan="4">' + (kind === "groups" ? "The bot isn't answering in any group yet. Add one above." : "No private chats allowed yet.") + '</td></tr>';
-    }).catch(function (e) { $(rowsId).innerHTML = '<tr class="empty"><td colspan="4">Couldn't load this list.</td></tr>'; flash(msgId, e.message, "err"); });
+    }).catch(function (e) { $(rowsId).innerHTML = "<tr class='empty'><td colspan='4'>Couldn't load this list.</td></tr>"; flash(msgId, e.message, "err"); });
   }
   function loadGroups() { loadList("groups", "grpRows", "grpCount", "grpMsg"); }
   // Fetch group subjects from WhatsApp once so the table shows names, not just JIDs.
@@ -446,7 +446,7 @@ export function renderAdminPage(): string {
         var dead = !!k.revokedAt;
         return '<tr' + (dead ? ' class="off"' : "") + '><td>' + esc(k.name) + '<span class="sub mono">' + esc(k.prefix) + '…</span></td><td>' + esc(k.role) + '</td><td>' + (k.botNumber == null ? "Any" : esc(botName(k.botNumber))) + '</td><td class="hide-sm muted">' + (k.lastUsedAt ? ago(new Date(k.lastUsedAt).getTime()) + " ago" : "Never") + '</td><td class="actions">' + (dead ? '<span class="muted">Revoked</span>' : '<button class="quiet danger" data-revoke="' + k.id + '">Revoke</button>') + '</td></tr>';
       }).join("") : '<tr class="empty"><td colspan="5">No keys yet. Create one to let a script send through the bot.</td></tr>';
-    }).catch(function (e) { $("kRows").innerHTML = '<tr class="empty"><td colspan="5">Couldn't load keys.</td></tr>'; flash("kMsg", e.message, "err"); });
+    }).catch(function (e) { $("kRows").innerHTML = "<tr class='empty'><td colspan='5'>Couldn't load keys.</td></tr>"; flash("kMsg", e.message, "err"); });
   }
   $("addKeyBtn").onclick = function () { $("kBot").innerHTML = botOptions("", true); $("addKeyPanel").classList.toggle("hidden"); $("kName").focus(); };
   $("addKeyClose").onclick = function () { $("addKeyPanel").classList.add("hidden"); $("kNew").classList.add("hidden"); };
