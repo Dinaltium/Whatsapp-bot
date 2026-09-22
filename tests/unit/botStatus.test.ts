@@ -32,6 +32,13 @@ describe("watchdogVerdict", () => {
     expect(watchdogVerdict(5 * MIN, 5 * MIN, s)).toMatch(/lastCloseCode=428/);
   });
 
+  it("measures from the drop, not from the last open (regression: false fire after a long run)", () => {
+    // Open at t=0, healthy for 49 minutes, dropped at t=49min, now t=49min+20s.
+    const s = status({ state: "connecting", lastOpenAt: 0, lastCloseAt: 49 * MIN, lastCloseCode: 428 });
+    expect(watchdogVerdict(49 * MIN + 20_000, 5 * MIN, s)).toBeNull();
+    expect(watchdogVerdict(54 * MIN, 5 * MIN, s)).not.toBeNull();
+  });
+
   it("uses startedAt as the reference when the socket never opened", () => {
     const s = status({ state: "connecting", startedAt: 10 * MIN });
     expect(watchdogVerdict(14 * MIN, 5 * MIN, s)).toBeNull();

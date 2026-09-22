@@ -99,8 +99,13 @@ export function watchdogVerdict(now: number, staleMs: number, s: Readonly<BotSta
   if (s.state === "open") return null;
   if (s.state === "logged_out") return null; // needs a human + QR, restarting won't help
   if (s.qr) return null; // pairing in progress — restarting would just churn QR codes
-  const reference = s.lastOpenAt ?? s.startedAt;
-  const downFor = now - reference;
+  // Measure from when we went DOWN, not from when we last came up — otherwise
+  // a drop after a long healthy run trips the watchdog on the very next tick.
+  const wentDownAt =
+    s.lastCloseAt !== null && (s.lastOpenAt === null || s.lastCloseAt >= s.lastOpenAt)
+      ? s.lastCloseAt
+      : s.lastOpenAt ?? s.startedAt;
+  const downFor = now - wentDownAt;
   if (downFor >= staleMs) {
     return `socket not open for ${Math.round(downFor / 1000)}s (state=${s.state}, lastCloseCode=${s.lastCloseCode ?? "n/a"})`;
   }
