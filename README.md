@@ -221,6 +221,10 @@ Errors: `401` bad key · `403 recipient_not_allowlisted | recipient_disabled | b
 
 Node runtime (no Docker needed — `ffmpeg-static` ships the binary). Build `npm ci && npm run build`, start `npm start`. Do **not** set `PORT`; Render injects it. Set health check path to `/health`. Free tier sleeps after 15 min idle and drops the WA socket — use a Background Worker / Starter plan, or an external pinger on `/health`.
 
+## Deployment (Android phone, Termux)
+
+Runs on a spare phone in Debian under Termux, with Neon and Upstash unchanged, so the WhatsApp session carries over. `deploy/termux/run.sh` replaces Render's restart-on-exit; `~/botctl.sh` starts it in the background and on boot. Full walkthrough, including the Android battery and phantom-process settings: [docs/termux.md](docs/termux.md).
+
 ## Deployment (VPS)
 
 Runs on a plain VPS (Docker or a Node process manager).

@@ -1,0 +1,2 @@
+# Shell scripts run on Linux/Termux; CRLF breaks them (bash reads the CR as part of each command).
+*.sh text eol=lf
