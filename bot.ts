@@ -10,6 +10,9 @@ import crypto from "crypto";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import "dotenv/config";
+import { installPlatformShims } from "./utils/platformShims";
+// Before anything that might probe the network stack (Termux/proot guard).
+installPlatformShims();
 import { installLibsignalQuiet } from "./utils/quietLibsignal";
 // Must run before any libsignal decrypt happens (i.e. before the socket exists).
 installLibsignalQuiet();

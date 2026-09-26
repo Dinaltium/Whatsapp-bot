@@ -48,6 +48,10 @@ import { redis } from "../storage/redisClient";
 import { logEvent } from "../utils/logger";
 import { cacheMessageForContext } from "../utils/contextWindow";
 
+// Owner-away auto-responder (agents/Generic). Off unless explicitly enabled.
+const GENERIC_AUTORESPONDER_ENABLED =
+  (process.env.GENERIC_AUTORESPONDER_ENABLED || "").toLowerCase() === "true";
+
 function unwrapMessage(message: any): any {
   if (!message) return null;
   if (message.ephemeralMessage?.message) {
@@ -256,22 +260,28 @@ async function processInboundMessage(
     // when it owns the message (greeting / limited reply / silent over-budget),
     // in which case we stop here. Groups, admins, and allowlisted chats fall
     // through to the normal flow.
-    try {
-      const { handleGenericInbound } = await import(
-        "../agents/Generic/autoResponder"
-      );
-      const handledGeneric = await handleGenericInbound({
-        sock,
-        from: from || "",
-        senderId,
-        text,
-        isAdmin: isAdminSender(msg, senderId),
-        groqApiKey: GROQ_API_KEY,
-        msgId: msg.key?.id || undefined,
-      });
-      if (handledGeneric) return;
-    } catch (err) {
-      console.error("[messageRouter] generic auto-responder error:", err);
+    //
+    // Off by default, pending optimisation. Set
+    // GENERIC_AUTORESPONDER_ENABLED=true to turn it back on. While off, DMs to
+    // the owner get no away greeting, no !chat reply, and no laptop toast.
+    if (GENERIC_AUTORESPONDER_ENABLED) {
+      try {
+        const { handleGenericInbound } = await import(
+          "../agents/Generic/autoResponder"
+        );
+        const handledGeneric = await handleGenericInbound({
+          sock,
+          from: from || "",
+          senderId,
+          text,
+          isAdmin: isAdminSender(msg, senderId),
+          groqApiKey: GROQ_API_KEY,
+          msgId: msg.key?.id || undefined,
+        });
+        if (handledGeneric) return;
+      } catch (err) {
+        console.error("[messageRouter] generic auto-responder error:", err);
+      }
     }
 
     if (await shouldSkipMessage(sock, msg, from, text, senderId)) {
